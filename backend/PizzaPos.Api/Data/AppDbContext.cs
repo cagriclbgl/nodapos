@@ -65,9 +65,12 @@ public class AppDbContext : DbContext
             b.Property(x => x.EventType).IsRequired().HasMaxLength(60);
             b.Property(x => x.PayloadJson).IsRequired();
             b.Property(x => x.LastError).HasMaxLength(500);
+            b.Property(x => x.ApplyError).HasMaxLength(2000);
 
-            // SyncWorker queue scan: unsent rows ordered by CreatedAt.
+            // SyncWorker (kasa) queue scan: unsent rows ordered by CreatedAt.
             b.HasIndex(x => new { x.SentAt, x.CreatedAt });
+            // Cloud-side apply scan: ingested-but-unapplied rows.
+            b.HasIndex(x => new { x.AppliedAt, x.CreatedAt });
         });
     }
 

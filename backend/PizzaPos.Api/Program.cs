@@ -132,6 +132,7 @@ builder.Services.AddScoped<IProductService, ProductService>();
 builder.Services.AddScoped<IOrderService, OrderService>();
 builder.Services.AddScoped<ICustomerService, CustomerService>();
 builder.Services.AddScoped<IOutboxEmitter, OutboxEmitter>();
+builder.Services.AddScoped<IIngestApplyService, IngestApplyService>();
 
 // --- Sync (offline-first kasa → cloud mirror) -------------------------------
 builder.Services.AddHttpClient();

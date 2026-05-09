@@ -16,11 +16,19 @@ public class SyncController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly SyncOptions _options;
+    private readonly IIngestApplyService _apply;
+    private readonly ILogger<SyncController> _logger;
 
-    public SyncController(AppDbContext db, IOptions<SyncOptions> options)
+    public SyncController(
+        AppDbContext db,
+        IOptions<SyncOptions> options,
+        IIngestApplyService apply,
+        ILogger<SyncController> logger)
     {
         _db = db;
         _options = options.Value;
+        _apply = apply;
+        _logger = logger;
     }
 
     public record IngestEventDto(
@@ -84,7 +92,40 @@ public class SyncController : ControllerBase
             await _db.SaveChangesAsync(ct);
         }
 
-        return Ok(new { ingested = fresh.Count, skipped = existing.Count });
+        // Apply each freshly-ingested event into the actual entity tables
+        // (Order/Customer/etc.). Failures are recorded on the row but do NOT
+        // cause the whole ingest to fail — the kasa already has the event in
+        // its outbox marked Sent, so re-delivery isn't going to retry. A
+        // background worker (future) can sweep ApplyError != null rows.
+        var applied = 0;
+        var failed = 0;
+        foreach (var row in fresh)
+        {
+            var result = await _apply.ApplyAsync(row, ct);
+            if (result.Success)
+            {
+                row.AppliedAt = DateTime.UtcNow;
+                row.ApplyError = null;
+                applied++;
+            }
+            else
+            {
+                row.ApplyError = result.Error;
+                failed++;
+                _logger.LogWarning(
+                    "IngestApply failure: event {Id} ({Type}) — {Error}",
+                    row.Id, row.EventType, result.Error);
+            }
+        }
+        if (fresh.Count > 0) await _db.SaveChangesAsync(ct);
+
+        return Ok(new
+        {
+            ingested = fresh.Count,
+            skipped = existing.Count,
+            applied,
+            applyFailed = failed,
+        });
     }
 
     /// <summary>

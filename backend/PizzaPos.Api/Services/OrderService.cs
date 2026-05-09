@@ -104,18 +104,45 @@ public class OrderService : IOrderService
 
         await _db.SaveChangesAsync(ct);
 
+        // Full snapshot — apply on cloud needs every field to materialize the
+        // Order graph atomically (items + per-item options). Ids of children
+        // come along so re-delivery is idempotent.
         await _outbox.EmitAsync("Order", order.Id, "OrderCreated",
             new
             {
                 order.Id,
+                order.StoreId,
                 order.OrderNumber,
                 order.TableId,
                 order.OrderType,
+                status = order.Status,
+                order.Subtotal,
+                order.DiscountAmount,
                 order.Total,
                 order.CustomerId,
                 order.CustomerName,
                 order.CustomerPhone,
-                createdAt = order.CreatedAt
+                order.Notes,
+                order.CreatedByUserId,
+                createdAt = order.CreatedAt,
+                items = order.Items.Select(i => new
+                {
+                    i.Id,
+                    i.ProductId,
+                    i.ProductName,
+                    i.UnitPrice,
+                    i.Quantity,
+                    i.LineTotal,
+                    i.Notes,
+                    options = i.Options.Select(o => new
+                    {
+                        o.Id,
+                        o.ProductOptionId,
+                        o.GroupName,
+                        o.OptionName,
+                        o.AdditionalPrice
+                    })
+                })
             }, ct);
         await _db.SaveChangesAsync(ct);
 
@@ -447,11 +474,13 @@ public class OrderService : IOrderService
 
         await using var tx = await _db.Database.BeginTransactionAsync(ct);
 
-        // 1) Insert Payment rows.
+        // 1) Insert Payment rows. Hold references so we can emit their Ids in
+        // the OrderCompleted payload — needed for idempotent cloud-side apply.
         var actorId = _currentUser.UserId;
+        var paymentRows = new List<Payment>(request.Payments.Count);
         foreach (var p in request.Payments)
         {
-            _db.Payments.Add(new Payment
+            var pay = new Payment
             {
                 OrderId = orderInfo.Id,
                 Amount = p.Amount,
@@ -460,7 +489,9 @@ public class OrderService : IOrderService
                 ReferenceNumber = p.ReferenceNumber,
                 Notes = p.Notes,
                 CreatedByUserId = actorId
-            });
+            };
+            _db.Payments.Add(pay);
+            paymentRows.Add(pay);
         }
         await _db.SaveChangesAsync(ct);
 
@@ -490,11 +521,15 @@ public class OrderService : IOrderService
                 orderId = orderInfo.Id,
                 total = orderInfo.Total,
                 completedAt = now,
-                payments = request.Payments.Select(p => new
+                payments = paymentRows.Select(p => new
                 {
+                    p.Id,
                     p.Amount,
                     p.Method,
-                    p.ReferenceNumber
+                    paidAt = p.PaidAt,
+                    p.ReferenceNumber,
+                    p.Notes,
+                    p.CreatedByUserId
                 })
             }, ct);
         await _db.SaveChangesAsync(ct);
