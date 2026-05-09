@@ -11,6 +11,63 @@ namespace PizzaPos.Api.Migrations.Postgres
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            // Recreate the customers + customer_addresses tables that the
+            // original AddCustomers migration .cs file was supposed to create.
+            // (The .cs was lost in Sprint 6 — the model snapshot kept these
+            // entities but no migration actually emitted CREATE TABLE for them.
+            // Old Supabase already had the tables, so it never noticed; a fresh
+            // Hetzner Postgres would be missing them entirely.)
+            //
+            // Wrapped in raw SQL with IF NOT EXISTS so that any existing
+            // database where the AddCustomers migration was historically
+            // applied — and the tables are therefore already present — keeps
+            // working. New / clean databases get the tables for the first time.
+            migrationBuilder.Sql(@"
+                CREATE TABLE IF NOT EXISTS customers (
+                    ""Id""        uuid                       NOT NULL,
+                    ""StoreId""   uuid                       NOT NULL,
+                    ""Name""      character varying(200)     NOT NULL,
+                    ""Phone""     character varying(50)      NOT NULL,
+                    ""Notes""     character varying(1000),
+                    ""IsActive""  boolean                    NOT NULL,
+                    ""CreatedAt"" timestamp with time zone   NOT NULL,
+                    ""UpdatedAt"" timestamp with time zone,
+                    CONSTRAINT ""PK_customers"" PRIMARY KEY (""Id""),
+                    CONSTRAINT ""FK_customers_stores_StoreId""
+                        FOREIGN KEY (""StoreId"") REFERENCES stores (""Id"") ON DELETE RESTRICT
+                );
+
+                CREATE UNIQUE INDEX IF NOT EXISTS ""IX_customers_StoreId_Phone""
+                    ON customers (""StoreId"", ""Phone"");
+                CREATE INDEX IF NOT EXISTS ""IX_customers_StoreId_IsActive""
+                    ON customers (""StoreId"", ""IsActive"");
+                CREATE INDEX IF NOT EXISTS ""IX_customers_StoreId_Name""
+                    ON customers (""StoreId"", ""Name"");
+
+                CREATE TABLE IF NOT EXISTS customer_addresses (
+                    ""Id""          uuid                     NOT NULL,
+                    ""StoreId""     uuid                     NOT NULL,
+                    ""CustomerId""  uuid                     NOT NULL,
+                    ""Label""       character varying(50)    NOT NULL,
+                    ""AddressLine"" character varying(500)   NOT NULL,
+                    ""District""    character varying(100),
+                    ""Notes""       character varying(500),
+                    ""IsDefault""   boolean                  NOT NULL,
+                    ""CreatedAt""   timestamp with time zone NOT NULL,
+                    ""UpdatedAt""   timestamp with time zone,
+                    CONSTRAINT ""PK_customer_addresses"" PRIMARY KEY (""Id""),
+                    CONSTRAINT ""FK_customer_addresses_customers_CustomerId""
+                        FOREIGN KEY (""CustomerId"") REFERENCES customers (""Id"") ON DELETE CASCADE,
+                    CONSTRAINT ""FK_customer_addresses_stores_StoreId""
+                        FOREIGN KEY (""StoreId"") REFERENCES stores (""Id"") ON DELETE RESTRICT
+                );
+
+                CREATE INDEX IF NOT EXISTS ""IX_customer_addresses_StoreId_CustomerId""
+                    ON customer_addresses (""StoreId"", ""CustomerId"");
+                CREATE INDEX IF NOT EXISTS ""IX_customer_addresses_CustomerId""
+                    ON customer_addresses (""CustomerId"");
+            ");
+
             migrationBuilder.CreateTable(
                 name: "outbox_events",
                 columns: table => new
@@ -43,6 +100,8 @@ namespace PizzaPos.Api.Migrations.Postgres
         {
             migrationBuilder.DropTable(
                 name: "outbox_events");
+            migrationBuilder.Sql("DROP TABLE IF EXISTS customer_addresses;");
+            migrationBuilder.Sql("DROP TABLE IF EXISTS customers;");
         }
     }
 }

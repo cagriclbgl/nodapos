@@ -216,14 +216,22 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
-// --- SQLite schema bootstrap ------------------------------------------------
-// Offline kasa (SQLite) için migration paketi henüz yok; ilk açılışta model'den
-// schema üret. Postgres tarafında migration'lar Supabase'e elle uygulanıyor.
-if (string.Equals(dbProvider, "Sqlite", StringComparison.OrdinalIgnoreCase))
+// --- Schema bootstrap -------------------------------------------------------
+// SQLite (kasa) has no migration package — generate the schema from the model
+// on first launch. Postgres (cloud) applies the migration history idempotently
+// so a clean Hetzner DB gets every table on first boot, and subsequent schema
+// changes flow through the migration pipeline without manual `ef database update`.
 {
     using var schemaScope = app.Services.CreateScope();
     var schemaDb = schemaScope.ServiceProvider.GetRequiredService<AppDbContext>();
-    await schemaDb.Database.EnsureCreatedAsync();
+    if (string.Equals(dbProvider, "Sqlite", StringComparison.OrdinalIgnoreCase))
+    {
+        await schemaDb.Database.EnsureCreatedAsync();
+    }
+    else
+    {
+        await schemaDb.Database.MigrateAsync();
+    }
 }
 
 // --- Bootstrap Supervisor ---------------------------------------------------
