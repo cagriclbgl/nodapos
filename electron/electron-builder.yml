@@ -1,0 +1,16 @@
+appId: com.pizzapos.desktop
+productName: PizzaPos
+directories:
+  output: dist-installer
+files:
+  - dist/**
+  - package.json
+extraResources:
+  - from: resources/api
+    to: api
+win:
+  target: nsis
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+asar: true

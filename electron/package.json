@@ -1,0 +1,22 @@
+{
+  "name": "pizzapos-desktop",
+  "version": "0.1.0",
+  "description": "PizzaPos offline-first desktop shell — wraps the .NET backend (SQLite) and the Next.js frontend in a single Electron window.",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc -w",
+    "start": "electron .",
+    "publish-api": "powershell -ExecutionPolicy Bypass -File scripts/publish-api.ps1",
+    "make": "electron-builder"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/wait-on": "^5.3.4",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0",
+    "get-port": "^5.1.1",
+    "typescript": "^5.6.0",
+    "wait-on": "^8.0.0"
+  }
+}

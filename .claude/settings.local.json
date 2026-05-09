@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet *)",
+      "Bash(Out-Null)",
+      "Bash(Get-ChildItem \"C:\\\\Users\\\\w11\\\\Desktop\\\\menu\\\\backend\\\\PizzaPos.Api\")",
+      "Bash(DOTNET_ROLL_FORWARD=Major ASPNETCORE_ENVIRONMENT=Development dotnet build --nologo)",
+      "Bash(npm install *)",
+      "Bash(DOTNET_ROLL_FORWARD=Major ASPNETCORE_ENVIRONMENT=Development Database__Provider=Postgres dotnet ef database update)",
+      "Bash(taskkill /IM electron.exe /F)",
+      "Bash(taskkill /IM PizzaPos.Api.exe /F)",
+      "Bash(rm -f \"C:/Users/w11/AppData/Roaming/pizzapos-desktop/pos.db\")",
+      "Read(//c/Users/w11/AppData/Roaming/pizzapos-desktop/**)"
+    ]
+  }
+}

@@ -1,0 +1,33 @@
+# Caddy auto-issues TLS via Let's Encrypt for {$DOMAIN} (api.nodapos.com).
+# DNS A record for the domain must point at this server's public IP first —
+# otherwise the ACME HTTP-01 challenge fails and certs aren't issued.
+
+{
+    email {$ACME_EMAIL}
+    # Production directory is the default; uncomment for staging while debugging.
+    # acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+{$DOMAIN} {
+    encode gzip zstd
+
+    # API runs on the docker network — name resolves via compose service name.
+    reverse_proxy api:5000
+
+    # Tighten security headers. The frontend lives on Vercel (different origin),
+    # so cookies must be SameSite=None; Secure — Program.cs already sets that
+    # in Production. CORS allow-list is configured server-side.
+    header {
+        Strict-Transport-Security "max-age=63072000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "no-referrer"
+        # Hide the Caddy version banner.
+        -Server
+    }
+
+    log {
+        output stdout
+        format console
+        level INFO
+    }
+}
