@@ -38,22 +38,27 @@ public class AuthController : ControllerBase
     public async Task<ActionResult<LoginResponse>> Login(
         [FromBody] LoginRequest request, CancellationToken ct)
     {
-        // 423 Locked: store has no Manager yet — frontend should redirect to /setup.
-        var hasManager = await _db.Users
-            .IgnoreQueryFilters()
-            .AnyAsync(u => u.StoreId == request.StoreId && u.Role == UserRole.Manager, ct);
-        if (!hasManager)
+        // Bootstrap guard: only run when the client *explicitly* targeted a store.
+        // Username-only flow (StoreId null) lets AuthService resolve the tenant
+        // globally and surface 401/409 itself — no store-scoped pre-check applies.
+        if (request.StoreId is Guid scopedStoreId && scopedStoreId != Guid.Empty)
         {
-            // Differentiate "store doesn't exist" (404) from "store has no manager" (423).
-            var storeExists = await _db.Stores.AnyAsync(s => s.Id == request.StoreId, ct);
-            if (!storeExists) return NotFound();
-            return StatusCode(StatusCodes.Status423Locked, new ProblemDetails
+            var hasManager = await _db.Users
+                .IgnoreQueryFilters()
+                .AnyAsync(u => u.StoreId == scopedStoreId && u.Role == UserRole.Manager, ct);
+            if (!hasManager)
             {
-                Status = StatusCodes.Status423Locked,
-                Title = "Setup required",
-                Detail = "This store has no Manager configured yet. Bootstrap the first Manager to continue.",
-                Instance = HttpContext.Request.Path
-            });
+                // Differentiate "store doesn't exist" (404) from "store has no manager" (423).
+                var storeExists = await _db.Stores.AnyAsync(s => s.Id == scopedStoreId, ct);
+                if (!storeExists) return NotFound();
+                return StatusCode(StatusCodes.Status423Locked, new ProblemDetails
+                {
+                    Status = StatusCodes.Status423Locked,
+                    Title = "Setup required",
+                    Detail = "This store has no Manager configured yet. Bootstrap the first Manager to continue.",
+                    Instance = HttpContext.Request.Path
+                });
+            }
         }
 
         var (user, _, response) = await _auth.LoginAsync(request, ct);
