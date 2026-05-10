@@ -123,7 +123,7 @@ export default function LoginPage() {
             <Pizza className="h-6 w-6" />
           </div>
           <div>
-            <CardTitle>PizzaPos Giriş</CardTitle>
+            <CardTitle>NodaPos Giriş</CardTitle>
             <CardDescription className="mt-1">
               Kullanıcı adın ve şifrenle giriş yap.
             </CardDescription>

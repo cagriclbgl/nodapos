@@ -53,7 +53,7 @@ export default function DesignSystemPage() {
           <Badge variant="outline" className="gap-1">
             <Sparkles className="h-3 w-3" /> design preview
           </Badge>
-          <h1 className="text-4xl font-bold tracking-tight">PizzaPos · Design System</h1>
+          <h1 className="text-4xl font-bold tracking-tight">NodaPos · Design System</h1>
           <p className="text-muted-foreground">
             shadcn/ui (default zinc) komponentleri. Brand renkleri henüz uygulanmadı.
           </p>

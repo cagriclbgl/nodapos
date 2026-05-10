@@ -49,9 +49,9 @@ export default function AdminLayout({
         <aside className="border-b bg-card p-4 md:w-64 md:border-b-0 md:border-r">
           <div className="mb-6 flex items-center gap-2 px-2">
             <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
-              <span className="text-base font-bold">P</span>
+              <span className="text-base font-bold">N</span>
             </div>
-            <h1 className="text-lg font-semibold tracking-tight">PizzaPos</h1>
+            <h1 className="text-lg font-semibold tracking-tight">NodaPos</h1>
           </div>
           <nav className="flex flex-row gap-1 overflow-x-auto md:flex-col">
             {NAV.map((item) => {

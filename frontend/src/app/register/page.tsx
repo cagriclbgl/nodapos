@@ -93,7 +93,7 @@ export default function RegisterPage() {
           <div>
             <CardTitle>Restoran Başvurusu</CardTitle>
             <CardDescription className="mt-1">
-              PizzaPos&apos;u kullanmak istediğinizi bize bildirin. Onay sonrası
+              NodaPos&apos;u kullanmak istediğinizi bize bildirin. Onay sonrası
               mağazanız ve yönetici hesabınız oluşturulur.
             </CardDescription>
           </div>

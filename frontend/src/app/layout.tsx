@@ -14,8 +14,11 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "PizzaPos",
-  description: "Pizzacı için bulut tabanlı POS ve yönetim sistemi.",
+  title: {
+    default: "NodaPos",
+    template: "%s · NodaPos",
+  },
+  description: "Restoran için bulut tabanlı POS ve yönetim sistemi.",
 };
 
 export default function RootLayout({
