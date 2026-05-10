@@ -19,14 +19,15 @@ public class JwtTokenService : IJwtTokenService
     public (string Token, DateTime ExpiresAtUtc) Issue(User user)
     {
         var (now, expires, creds) = Prepare();
+        // Sadece short claim adlari ("name","role"). MapInboundClaims=false
+        // ile birlikte identity bunlari oldugu gibi tasiyacak; TokenValidation
+        // parameters NameClaimType/RoleClaimType olarak kisa formu kullaniyor.
         var claims = new List<Claim>
         {
             new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
             new("name", user.Username),
-            new(ClaimTypes.Name, user.Username),
             new("role", user.Role.ToString()),
-            new(ClaimTypes.Role, user.Role.ToString()),
             new(JwtOptions.StoreIdClaim, user.StoreId.ToString()),
             new(JwtOptions.SubjectTypeClaim, JwtOptions.SubjectTypeUser),
         };
@@ -41,9 +42,7 @@ public class JwtTokenService : IJwtTokenService
             new(JwtRegisteredClaimNames.Sub, supervisor.Id.ToString()),
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
             new("name", supervisor.Username),
-            new(ClaimTypes.Name, supervisor.Username),
             new("role", JwtOptions.SupervisorRole),
-            new(ClaimTypes.Role, JwtOptions.SupervisorRole),
             new(JwtOptions.SubjectTypeClaim, JwtOptions.SubjectTypeSupervisor),
         };
         return Sign(claims, now, expires, creds);

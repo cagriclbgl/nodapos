@@ -86,6 +86,13 @@ builder.Services
     {
         options.RequireHttpsMetadata = !builder.Environment.IsDevelopment();
         options.SaveToken = false;
+        // Token mint sırasında zaten kısa claim adlari ("role","name","sub")
+        // kullanildigi icin inbound mapping'i kapatiyoruz. Aksi halde token'daki
+        // "role" short claim'i ClaimTypes.Role'a (uzun URL) otomatik
+        // mapleniyor; ama RoleClaimType="role" identity'de short formu
+        // ariyor ve IsInRole("Manager") match edemeyip [Authorize(Roles=
+        // "Manager")] 403 firlatti.
+        options.MapInboundClaims = false;
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
