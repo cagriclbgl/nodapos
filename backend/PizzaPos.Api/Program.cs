@@ -214,16 +214,24 @@ builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
-        if (allowedOrigins.Length == 0)
+        // Origin allow-list:
+        //  - localhost / 127.0.0.1 (her port) HER ZAMAN allow — kasa Electron'da
+        //    iki child process iki free port'ta calisir, sabit liste tutulamaz.
+        //  - Diger origin'ler Cors:AllowedOrigins config'inden cikarilan listeye
+        //    karsi check edilir (cloud Vercel: https://nodapos.com).
+        //  - Allow-list bos ve Development ise: tum origin'ler kabul (eski davranis).
+        policy.SetIsOriginAllowed(origin =>
         {
-            // In Development, reflect any localhost-ish origin so cookies still work
-            // (AllowAnyOrigin is incompatible with AllowCredentials per spec).
-            policy.SetIsOriginAllowed(_ => builder.Environment.IsDevelopment());
-        }
-        else
-        {
-            policy.WithOrigins(allowedOrigins);
-        }
+            if (string.IsNullOrEmpty(origin)) return false;
+            if (Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+            {
+                if (uri.Host == "localhost" || uri.Host == "127.0.0.1")
+                    return true;
+            }
+            if (allowedOrigins.Length == 0)
+                return builder.Environment.IsDevelopment();
+            return allowedOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase);
+        });
 
         policy
             .AllowAnyHeader()

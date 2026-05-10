@@ -8,7 +8,9 @@
     "dev": "tsc -w",
     "start": "electron .",
     "publish-api": "powershell -ExecutionPolicy Bypass -File scripts/publish-api.ps1",
-    "make": "electron-builder"
+    "publish-frontend": "powershell -ExecutionPolicy Bypass -File scripts/publish-frontend.ps1",
+    "publish-all": "npm run publish-api && npm run publish-frontend",
+    "make": "npm run build && npm run publish-all && electron-builder"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

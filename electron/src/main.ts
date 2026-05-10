@@ -7,10 +7,12 @@ import getPort from "get-port";
 import waitOn from "wait-on";
 
 let apiProcess: ChildProcess | null = null;
+let frontendProcess: ChildProcess | null = null;
 let mainWindow: BrowserWindow | null = null;
 let logStream: fs.WriteStream | null = null;
 let apiCrashCount = 0;
-const MAX_API_CRASHES = 3;
+let frontendCrashCount = 0;
+const MAX_CRASHES = 3;
 
 function log(msg: string) {
   const line = `[${new Date().toISOString()}] ${msg}\n`;
@@ -38,11 +40,12 @@ function getOrCreateJwtSecret(): string {
   return secret;
 }
 
+/**
+ * .NET self-contained API'yi child process olarak başlatır. SQLite mode,
+ * userData/pos.db'de veriyi tutar; cloud sync env'leri set edilmişse
+ * outbox/pull worker'ları aktive olur (Program.cs check).
+ */
 async function startApi(): Promise<number> {
-  // Frontend (Next.js) reads NEXT_PUBLIC_API_BASE_URL=http://localhost:5000.
-  // Prefer 5000 so the existing config works; fall back to a free port if
-  // someone else is on 5000 (note: in that case the browser-side frontend
-  // calls would still hit 5000 and fail — kill the conflicting process).
   const port = await getPort({ port: 5000 });
   const dbPath = path.join(app.getPath("userData"), "pos.db");
   const apiDir = app.isPackaged
@@ -53,14 +56,14 @@ async function startApi(): Promise<number> {
     process.platform === "win32" ? "PizzaPos.Api.exe" : "PizzaPos.Api"
   );
 
+  if (!fs.existsSync(exe)) {
+    throw new Error(
+      `API binary not found at ${exe}. Run "npm run publish-api" first.`
+    );
+  }
+
   log(`Starting API: exe=${exe} port=${port} db=${dbPath}`);
 
-  // Cloud sync wiring. Both values must match the cloud deployment exactly —
-  // the kasa won't be able to talk to it otherwise. Operator sets these via
-  // env when launching Electron (or through a future provisioning UI):
-  //   set PIZZAPOS_CLOUD_URL=https://api.nodapos.com
-  //   set PIZZAPOS_HMAC_SECRET=<same 64-char hex as cloud .env>
-  // Empty CloudBaseUrl disables both push and pull workers (Program.cs check).
   const cloudUrl = process.env.PIZZAPOS_CLOUD_URL ?? "";
   const hmacSecret = process.env.PIZZAPOS_HMAC_SECRET ?? "";
 
@@ -76,9 +79,10 @@ async function startApi(): Promise<number> {
       Sync__CloudBaseUrl: cloudUrl,
       Sync__HmacSecret: hmacSecret,
       Auth__Jwt__Secret: getOrCreateJwtSecret(),
-      // Frontend dev server origin — needed because Production mode disables
-      // the development "allow any localhost" fallback in Program.cs.
-      Cors__AllowedOrigins: "http://localhost:3000",
+      // Lokal frontend (Next standalone) bu Electron pencerede aynı orijinde
+      // yüklenir, ama Next standalone server ayrı portta. CORS için her ikisini
+      // de tanı; backend Cors__AllowedOrigins'i okur.
+      Cors__AllowedOrigins: "http://localhost:3000,http://127.0.0.1:3000",
       DOTNET_ROLL_FORWARD: "Major",
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -89,10 +93,10 @@ async function startApi(): Promise<number> {
   apiProcess.on("exit", (code) => {
     log(`API exited with code ${code}`);
     apiCrashCount++;
-    if (apiCrashCount >= MAX_API_CRASHES) {
+    if (apiCrashCount >= MAX_CRASHES) {
       dialog.showErrorBox(
         "PizzaPos API durdu",
-        `Backend ${apiCrashCount} kez crash etti. Loglar: ${logStream?.path ?? "(yok)"}`
+        `Backend ${apiCrashCount} kez çöktü. Loglar: ${logStream?.path ?? "(yok)"}`
       );
       app.quit();
     }
@@ -109,7 +113,75 @@ async function startApi(): Promise<number> {
   return port;
 }
 
-async function createWindow(port: number) {
+/**
+ * Next.js standalone build'ini (.next/standalone/server.js) child process
+ * olarak başlatır. Build env'i kasa-spesifik değil; frontend lib/env.ts
+ * runtime'da localhost host gördüğünde API URL'sini http://localhost:5000
+ * olarak çözer (cloud Vercel'de aynı kod cloud API'ye gider).
+ */
+async function startFrontend(apiPort: number): Promise<number> {
+  const port = await getPort({ port: 3000 });
+  const frontendDir = app.isPackaged
+    ? path.join(process.resourcesPath, "frontend")
+    : path.resolve(__dirname, "..", "resources", "frontend");
+  const serverJs = path.join(frontendDir, "server.js");
+
+  if (!fs.existsSync(serverJs)) {
+    throw new Error(
+      `Frontend bundle not found at ${serverJs}. Run "npm run publish-frontend" first.`
+    );
+  }
+
+  log(`Starting frontend: server=${serverJs} port=${port}`);
+
+  // Electron, kendi yerleşik Node executable'ını kullanır (process.execPath).
+  // Next standalone server.js plain Node ile çalışacak şekilde üretilir;
+  // Electron'un Node binary'si bunu sıkıntısız çalıştırır (ELECTRON_RUN_AS_NODE).
+  frontendProcess = spawn(process.execPath, [serverJs], {
+    cwd: frontendDir,
+    env: {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: "1",
+      PORT: String(port),
+      HOSTNAME: "127.0.0.1",
+      NODE_ENV: "production",
+      // SSR / build-time fallback için API URL — runtime browser'da zaten
+      // localhost'a kaydırılacak ama SSR sırasında doğru bir değer şart.
+      NEXT_PUBLIC_API_BASE_URL: `http://127.0.0.1:${apiPort}`,
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  frontendProcess.stdout?.on("data", (d) =>
+    log(`[front-out] ${d.toString().trim()}`)
+  );
+  frontendProcess.stderr?.on("data", (d) =>
+    log(`[front-err] ${d.toString().trim()}`)
+  );
+  frontendProcess.on("exit", (code) => {
+    log(`Frontend exited with code ${code}`);
+    frontendCrashCount++;
+    if (frontendCrashCount >= MAX_CRASHES) {
+      dialog.showErrorBox(
+        "PizzaPos arayüz durdu",
+        `Frontend ${frontendCrashCount} kez çöktü. Loglar: ${logStream?.path ?? "(yok)"}`
+      );
+      app.quit();
+    }
+  });
+
+  await waitOn({
+    resources: [`http-get://127.0.0.1:${port}/`],
+    timeout: 60_000,
+    interval: 500,
+    validateStatus: (s: number) => s < 500,
+  });
+
+  log(`Frontend ready on port ${port}`);
+  return port;
+}
+
+async function createWindow(frontendPort: number) {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -121,10 +193,11 @@ async function createWindow(port: number) {
     },
   });
 
-  // Dev: Next.js dev server. Production'da Next standalone'u 2. child process
-  // olarak başlatıp http://127.0.0.1:<otherPort> yüklemek doğru yol — sabah karar.
-  const url = process.env.PIZZAPOS_DEV_URL || "http://localhost:3000";
-  // const productionUrl = `http://127.0.0.1:${port}`;
+  const url =
+    process.env.PIZZAPOS_DEV_URL ||
+    (app.isPackaged
+      ? `http://127.0.0.1:${frontendPort}`
+      : "http://localhost:3000");
   log(`Loading window: ${url}`);
   await mainWindow.loadURL(url);
 }
@@ -132,8 +205,14 @@ async function createWindow(port: number) {
 app.whenReady().then(async () => {
   ensureLog();
   try {
-    const port = await startApi();
-    await createWindow(port);
+    const apiPort = await startApi();
+    let frontendPort = 3000;
+    if (app.isPackaged) {
+      frontendPort = await startFrontend(apiPort);
+    } else {
+      log("Dev mode: skipping bundled frontend, expecting Next dev server on 3000.");
+    }
+    await createWindow(frontendPort);
   } catch (err) {
     log(`Startup failed: ${err}`);
     dialog.showErrorBox("PizzaPos başlatılamadı", String(err));
@@ -142,22 +221,27 @@ app.whenReady().then(async () => {
 });
 
 app.on("before-quit", () => {
-  if (!apiProcess || apiProcess.killed) return;
-  log("Stopping API child process...");
-  try {
-    apiProcess.kill();
-  } catch {
-    /* ignore */
-  }
-  setTimeout(() => {
-    if (apiProcess && !apiProcess.killed) {
-      try {
-        apiProcess.kill("SIGKILL");
-      } catch {
-        /* ignore */
-      }
+  for (const [name, child] of [
+    ["frontend", frontendProcess],
+    ["api", apiProcess],
+  ] as const) {
+    if (!child || child.killed) continue;
+    log(`Stopping ${name} child process...`);
+    try {
+      child.kill();
+    } catch {
+      /* ignore */
     }
-  }, 5_000);
+    setTimeout(() => {
+      if (child && !child.killed) {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 5_000);
+  }
 });
 
 app.on("window-all-closed", () => {
