@@ -44,6 +44,11 @@ public class OrdersController : TenantControllerBase
         Guid id, [FromBody] AddOrderItemRequest request, CancellationToken ct)
         => Ok(await _service.AddItemAsync(id, request, ct));
 
+    [HttpPost("{id:guid}/combos")]
+    public async Task<ActionResult<OrderDto>> AddCombo(
+        Guid id, [FromBody] AddComboToOrderRequest request, CancellationToken ct)
+        => Ok(await _service.AddComboAsync(id, request, ct));
+
     [HttpPatch("{id:guid}/items/{itemId:guid}")]
     public async Task<ActionResult<OrderDto>> UpdateItem(
         Guid id, Guid itemId, [FromBody] UpdateOrderItemRequest request, CancellationToken ct)

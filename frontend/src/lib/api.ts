@@ -1,9 +1,12 @@
 import { API_BASE_URL } from "./env";
 import type {
+  AddComboToOrderRequest,
   AddressRequest,
   ApproveRegistrationRequest,
   ApproveRegistrationResponse,
   BootstrapRequest,
+  ComboDto,
+  CreateComboRequest,
   CreateCustomerRequest,
   CreateStoreRegistrationRequest,
   CreateUserRequest,
@@ -23,6 +26,7 @@ import type {
   SupervisorDashboardDto,
   SupervisorLoginRequest,
   SupervisorSessionResponse,
+  UpdateComboRequest,
   UpdateCustomerRequest,
   UpdateStoreRequest,
   UpdateUserRequest,
@@ -173,6 +177,32 @@ export const customers = {
     api.delete(`/api/customers/${id}/addresses/${addressId}`),
   orders: (id: string) =>
     api.get<OrderDto[]>(`/api/customers/${id}/orders`),
+};
+
+/**
+ * Kampanya / Combo menüleri. List ve Get tüm authed user'lara açık (kasiyer
+ * sipariş eklerken kullanır); Create/Update/Delete sadece Manager.
+ */
+export const combos = {
+  list: (activeOnly?: boolean) =>
+    api.get<ComboDto[]>(
+      `/api/combos${activeOnly ? "?activeOnly=true" : ""}`
+    ),
+  get: (id: string) => api.get<ComboDto>(`/api/combos/${id}`),
+  create: (req: CreateComboRequest) => api.post<ComboDto>("/api/combos", req),
+  update: (id: string, req: UpdateComboRequest) =>
+    api.put<ComboDto>(`/api/combos/${id}`, req),
+  remove: (id: string) => api.delete(`/api/combos/${id}`),
+};
+
+/**
+ * Order'a combo (snapshot) eklemek — sipariş ekranındaki "Kampanyalar" tab'ı
+ * kullanır. Her slot için seçilen ürün(ler) backend'e iletilir; backend tek
+ * bir OrderItem yaratıp Notes alanına seçim özetini yazar.
+ */
+export const orders = {
+  addCombo: (orderId: string, req: AddComboToOrderRequest) =>
+    api.post<OrderDto>(`/api/orders/${orderId}/combos`, req),
 };
 
 /**

@@ -28,4 +28,11 @@ public interface IOrderService
     Task<OrderDto> CompleteAsync(Guid orderId, CompleteOrderRequest request, CancellationToken ct = default);
 
     Task<OrderDto> CancelAsync(Guid orderId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Combo'yu siparişe tek bir snapshot OrderItem olarak ekler. Her slot
+    /// seçimleri Notes alanına yazılır. ProductId slot'tan seçilen ilk ürün
+    /// olur (FK için), ProductName ve UnitPrice Combo'dan kopyalanır.
+    /// </summary>
+    Task<OrderDto> AddComboAsync(Guid orderId, AddComboToOrderRequest request, CancellationToken ct = default);
 }

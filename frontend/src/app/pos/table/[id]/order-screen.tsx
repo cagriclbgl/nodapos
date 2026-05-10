@@ -15,8 +15,11 @@ import { useStoreContext } from "@/lib/store-context";
 import { describeError } from "@/lib/use-store-api";
 import { formatCurrency } from "@/lib/format";
 import {
+  AddComboToOrderRequest,
   AddOrderItemRequest,
   CategoryDto,
+  ComboDto,
+  ComboSlotSelection,
   CompleteOrderRequest,
   CreateOrderRequest,
   OrderDto,
@@ -31,6 +34,9 @@ import { cn } from "@/lib/utils";
 import { OptionsDialog } from "./options-dialog";
 import { PaymentDialog } from "./payment-dialog";
 import { DetailsDialog } from "./details-dialog";
+import { ComboPickerDialog } from "./combo-picker-dialog";
+
+const COMBO_TAB = "__combos__";
 
 interface Props {
   tableId: string;
@@ -52,9 +58,11 @@ export function OrderScreen({ tableId }: Props) {
   const [order, setOrder] = useState<OrderDto | null>(null);
   const [categories, setCategories] = useState<CategoryDto[]>([]);
   const [products, setProducts] = useState<ProductDto[]>([]);
+  const [combos, setCombos] = useState<ComboDto[]>([]);
   const [selectedCat, setSelectedCat] = useState<string>("");
 
   const [pendingProduct, setPendingProduct] = useState<ProductDto | null>(null);
+  const [pendingCombo, setPendingCombo] = useState<ComboDto | null>(null);
   const [showPayment, setShowPayment] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
 
@@ -68,7 +76,7 @@ export function OrderScreen({ tableId }: Props) {
     setLoading(true);
     setBootError(null);
     try {
-      const [tbl, cats, prods, activeOrders] = await Promise.all([
+      const [tbl, cats, prods, activeOrders, combosList] = await Promise.all([
         api.get<TableDto>(`/api/tables/${tableId}`, storeId),
         api.get<CategoryDto[]>("/api/categories", storeId),
         api.get<ProductDto[]>("/api/products", storeId),
@@ -76,10 +84,12 @@ export function OrderScreen({ tableId }: Props) {
           `/api/orders?status=Active&tableId=${tableId}`,
           storeId
         ),
+        api.get<ComboDto[]>("/api/combos?activeOnly=true", storeId),
       ]);
       setTable(tbl);
       setCategories(cats.filter((c) => c.isActive));
       setProducts(prods.filter((p) => p.isAvailable));
+      setCombos(combosList);
       setOrder(activeOrders[0] ?? null);
       if (!selectedCat && cats.length > 0) {
         setSelectedCat(cats[0].id);
@@ -189,6 +199,81 @@ export function OrderScreen({ tableId }: Props) {
     void addLine({ productId: p.id, quantity: 1, productOptionIds: [] });
   };
 
+  /**
+   * Combo'yu mevcut siparişe ekler. Henüz aktif sipariş yoksa, slot'lardan
+   * seçilen ilk ürünü seed olarak kullanarak siparişi açar; sonra
+   * /api/orders/{id}/combos ile combo'yu append eder ve seed kalemi siler.
+   * Aktif siparişte ise direkt /api/orders/{id}/combos.
+   */
+  const addCombo = async (
+    combo: ComboDto,
+    selections: ComboSlotSelection[]
+  ) => {
+    if (!storeId || !table) return;
+    setBusy(true);
+    setActionError(null);
+    try {
+      let workingOrderId: string;
+      let seedItemId: string | null = null;
+
+      if (!order) {
+        const firstPick = selections.find((s) => s.productIds.length > 0);
+        if (!firstPick) {
+          throw new Error("En az bir slot seçimi olmalı.");
+        }
+        const seedPayload: CreateOrderRequest = {
+          tableId: table.id,
+          orderType: "DineIn",
+          discountAmount: 0,
+          items: [
+            {
+              productId: firstPick.productIds[0],
+              quantity: 1,
+              productOptionIds: [],
+            },
+          ],
+        };
+        const created = await api.post<OrderDto>(
+          "/api/orders",
+          seedPayload,
+          storeId
+        );
+        workingOrderId = created.id;
+        seedItemId = created.items[0]?.id ?? null;
+      } else {
+        workingOrderId = order.id;
+      }
+
+      const comboReq: AddComboToOrderRequest = {
+        comboId: combo.id,
+        quantity: 1,
+        selections,
+      };
+      const afterCombo = await api.post<OrderDto>(
+        `/api/orders/${workingOrderId}/combos`,
+        comboReq,
+        storeId
+      );
+
+      // Seed kalemini (combo dışındaki) sil ki sepette sadece combo görünsün.
+      // Combo eklendiği için son kalem değil; remove auto-cancel etmez.
+      if (seedItemId) {
+        const cleaned = await api.delete<OrderDto>(
+          `/api/orders/${workingOrderId}/items/${seedItemId}`,
+          storeId
+        );
+        setOrder(cleaned);
+      } else {
+        setOrder(afterCombo);
+      }
+    } catch (err) {
+      setActionError(describeError(err));
+      throw err;
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const onCancel = async () => {
     if (!order) return;
     if (!confirm("Bu siparişi iptal etmek istediğine emin misin?")) return;
@@ -296,7 +381,7 @@ export function OrderScreen({ tableId }: Props) {
       <div className="flex flex-1 overflow-hidden">
         {/* Left — products */}
         <div className="flex flex-1 flex-col">
-          {/* Category tabs */}
+          {/* Category tabs + Kampanyalar */}
           <div className="flex gap-1 overflow-x-auto border-b bg-card px-3 py-2">
             {categories.map((c) => (
               <button
@@ -312,7 +397,20 @@ export function OrderScreen({ tableId }: Props) {
                 {c.name}
               </button>
             ))}
-            {categories.length === 0 && (
+            {combos.length > 0 && (
+              <button
+                onClick={() => setSelectedCat(COMBO_TAB)}
+                className={cn(
+                  "whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-colors",
+                  selectedCat === COMBO_TAB
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                )}
+              >
+                ✨ Kampanyalar
+              </button>
+            )}
+            {categories.length === 0 && combos.length === 0 && (
               <p className="px-3 py-2 text-sm text-muted-foreground">
                 Kategori yok.{" "}
                 <Link
@@ -325,9 +423,43 @@ export function OrderScreen({ tableId }: Props) {
             )}
           </div>
 
-          {/* Product grid */}
+          {/* Product / Combo grid */}
           <div className="flex-1 overflow-y-auto p-3">
-            {visibleProducts.length === 0 ? (
+            {selectedCat === COMBO_TAB ? (
+              combos.length === 0 ? (
+                <p className="p-6 text-center text-muted-foreground">
+                  Aktif kampanya yok.
+                </p>
+              ) : (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {combos.map((c) => (
+                    <button
+                      key={c.id}
+                      onClick={() => setPendingCombo(c)}
+                      disabled={busy}
+                      className="flex min-h-[120px] flex-col items-start justify-between rounded-2xl border bg-card p-4 text-left text-card-foreground shadow-sm transition-all hover:border-primary/60 hover:shadow-md active:scale-[0.99] disabled:opacity-60"
+                    >
+                      <div>
+                        <p className="text-base font-semibold leading-tight">
+                          ✨ {c.name}
+                        </p>
+                        {c.description && (
+                          <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+                            {c.description}
+                          </p>
+                        )}
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {c.items.length} slot
+                        </p>
+                      </div>
+                      <p className="mt-2 font-mono text-lg font-semibold tabular-nums text-primary">
+                        {formatCurrency(c.price)}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              )
+            ) : visibleProducts.length === 0 ? (
               <p className="p-6 text-center text-muted-foreground">
                 Bu kategoride satışta ürün yok.
               </p>
@@ -483,6 +615,18 @@ export function OrderScreen({ tableId }: Props) {
           onConfirm={async (line) => {
             await addLine(line);
             setPendingProduct(null);
+          }}
+        />
+      )}
+
+      {pendingCombo && (
+        <ComboPickerDialog
+          combo={pendingCombo}
+          products={products}
+          onClose={() => setPendingCombo(null)}
+          onConfirm={async (selections) => {
+            await addCombo(pendingCombo, selections);
+            setPendingCombo(null);
           }}
         />
       )}

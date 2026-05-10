@@ -253,6 +253,60 @@ export interface CreateOrderRequest {
   items: AddOrderItemRequest[];
 }
 
+export interface ComboItemDto {
+  id: string;
+  label: string;
+  categoryId: string;
+  categoryName: string;
+  quantity: number;
+  displayOrder: number;
+}
+
+export interface ComboDto {
+  id: string;
+  name: string;
+  description: string | null;
+  price: number;
+  isActive: boolean;
+  displayOrder: number;
+  items: ComboItemDto[];
+}
+
+export interface CreateComboItemRequest {
+  label: string;
+  categoryId: string;
+  quantity: number;
+  displayOrder: number;
+}
+
+export interface CreateComboRequest {
+  name: string;
+  description?: string | null;
+  price: number;
+  displayOrder: number;
+  items: CreateComboItemRequest[];
+}
+
+export interface UpdateComboRequest {
+  name: string;
+  description?: string | null;
+  price: number;
+  isActive: boolean;
+  displayOrder: number;
+  items: CreateComboItemRequest[];
+}
+
+export interface ComboSlotSelection {
+  comboItemId: string;
+  productIds: string[];
+}
+
+export interface AddComboToOrderRequest {
+  comboId: string;
+  quantity: number;
+  selections: ComboSlotSelection[];
+}
+
 export interface CustomerListItemDto {
   id: string;
   name: string;

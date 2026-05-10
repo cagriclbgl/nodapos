@@ -539,6 +539,125 @@ public class OrderService : IOrderService
         return (await GetAsync(orderInfo.Id, ct))!;
     }
 
+    public async Task<OrderDto> AddComboAsync(Guid orderId, AddComboToOrderRequest request, CancellationToken ct = default)
+    {
+        if (request.Quantity <= 0)
+            throw new DomainException("Combo quantity must be positive.");
+        if (request.Selections is null || request.Selections.Count == 0)
+            throw new DomainException("Slot seçimleri eksik.");
+
+        var orderInfo = await _db.Orders
+            .Where(o => o.Id == orderId)
+            .Select(o => new { o.Id, o.Status, o.DiscountAmount })
+            .FirstOrDefaultAsync(ct)
+            ?? throw DomainException.NotFound("Order");
+
+        if (orderInfo.Status != OrderStatus.Active)
+            throw DomainException.Conflict("Cannot add combo to a non-active order.");
+
+        var combo = await _db.Combos
+            .Include(c => c.Items)
+            .FirstOrDefaultAsync(c => c.Id == request.ComboId, ct)
+            ?? throw DomainException.NotFound("Kombo");
+
+        if (!combo.IsActive)
+            throw DomainException.Conflict($"Kombo '{combo.Name}' aktif değil.");
+
+        // Her slot için seçim sayısı slot.Quantity ile eşleşmeli; ürünler aynı
+        // store'da ve slot kategorisinden olmalı.
+        var slotById = combo.Items.ToDictionary(i => i.Id);
+        var allProductIds = request.Selections
+            .SelectMany(s => s.ProductIds)
+            .Distinct()
+            .ToList();
+        var products = await _db.Products
+            .Where(p => allProductIds.Contains(p.Id))
+            .Select(p => new { p.Id, p.Name, p.CategoryId, p.IsAvailable })
+            .ToListAsync(ct);
+        var productById = products.ToDictionary(p => p.Id);
+
+        var summaryParts = new List<string>();
+        Guid? firstProductId = null;
+        foreach (var slot in combo.Items.OrderBy(i => i.DisplayOrder))
+        {
+            var sel = request.Selections.FirstOrDefault(s => s.ComboItemId == slot.Id)
+                ?? throw new DomainException($"'{slot.Label}' slotu için seçim eksik.");
+
+            if (sel.ProductIds.Count != slot.Quantity)
+                throw new DomainException(
+                    $"'{slot.Label}' slotu için {slot.Quantity} ürün seçilmeli (gönderilen: {sel.ProductIds.Count}).");
+
+            var pickedNames = new List<string>();
+            foreach (var pid in sel.ProductIds)
+            {
+                if (!productById.TryGetValue(pid, out var prod))
+                    throw DomainException.NotFound($"Product {pid}");
+                if (!prod.IsAvailable)
+                    throw DomainException.Conflict($"Ürün '{prod.Name}' kullanılamıyor.");
+                if (prod.CategoryId != slot.CategoryId)
+                    throw new DomainException(
+                        $"'{prod.Name}' '{slot.Label}' slotunun kategorisinde değil.");
+                pickedNames.Add(prod.Name);
+                firstProductId ??= prod.Id;
+            }
+            summaryParts.Add($"{slot.Label}: {string.Join(", ", pickedNames)}");
+            _ = slotById; // slot kullanımını analyze warning'ten korur
+        }
+
+        if (firstProductId is null)
+            throw new DomainException("Kombo seçimleri boş.");
+
+        // ProductId, snapshot mantığı korunsun diye gerçek bir ürün ID'sine
+        // bağlanır (slot'taki ilk seçim). Görünüm/raporda ProductName ve
+        // UnitPrice override eder, çünkü OrderItem snapshot fields'ları doldurur.
+        var item = new OrderItem
+        {
+            OrderId = orderInfo.Id,
+            ProductId = firstProductId.Value,
+            ProductName = combo.Name,        // SNAPSHOT (combo adı)
+            UnitPrice = combo.Price,         // SNAPSHOT (combo fiyatı)
+            Quantity = request.Quantity,
+            Notes = string.Join(" | ", summaryParts),
+        };
+        item.LineTotal = item.UnitPrice * item.Quantity;
+
+        await using var tx = await _db.Database.BeginTransactionAsync(ct);
+
+        _db.OrderItems.Add(item);
+        await _db.SaveChangesAsync(ct);
+
+        var newSubtotal = await _db.OrderItems
+            .Where(i => i.OrderId == orderInfo.Id)
+            .SumAsync(i => (decimal?)i.LineTotal, ct) ?? 0m;
+        var newTotal = Math.Max(0m, newSubtotal - orderInfo.DiscountAmount);
+        var now = DateTime.UtcNow;
+
+        await _db.Orders
+            .Where(o => o.Id == orderInfo.Id)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(o => o.Subtotal, newSubtotal)
+                .SetProperty(o => o.Total, newTotal)
+                .SetProperty(o => o.UpdatedAt, (DateTime?)now), ct);
+
+        await _outbox.EmitAsync("Order", orderInfo.Id, "OrderItemAdded",
+            new
+            {
+                orderId = orderInfo.Id,
+                itemId = item.Id,
+                productId = item.ProductId,
+                productName = item.ProductName,
+                unitPrice = item.UnitPrice,
+                quantity = item.Quantity,
+                lineTotal = item.LineTotal,
+                notes = item.Notes,
+                comboId = combo.Id,
+            }, ct);
+        await _db.SaveChangesAsync(ct);
+
+        await tx.CommitAsync(ct);
+        return (await GetAsync(orderInfo.Id, ct))!;
+    }
+
     public async Task<OrderDto> CancelAsync(Guid orderId, CancellationToken ct = default)
     {
         var orderInfo = await _db.Orders

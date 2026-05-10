@@ -9,6 +9,7 @@ import {
   ClipboardList,
   LayoutGrid,
   Package,
+  Sparkles,
   Tag,
   Users,
   UserCog,
@@ -27,6 +28,7 @@ interface NavItem {
 const NAV: NavItem[] = [
   { href: "/admin", label: "Özet", icon: BarChart3 },
   { href: "/admin/products", label: "Ürünler", icon: Package },
+  { href: "/admin/combos", label: "Kampanyalar", icon: Sparkles },
   { href: "/admin/categories", label: "Kategoriler", icon: Tag },
   { href: "/admin/tables", label: "Masalar", icon: LayoutGrid },
   { href: "/admin/orders", label: "Siparişler", icon: ClipboardList },

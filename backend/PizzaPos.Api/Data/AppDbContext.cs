@@ -26,6 +26,8 @@ public class AppDbContext : DbContext
     public DbSet<User> Users => Set<User>();
     public DbSet<Customer> Customers => Set<Customer>();
     public DbSet<CustomerAddress> CustomerAddresses => Set<CustomerAddress>();
+    public DbSet<Combo> Combos => Set<Combo>();
+    public DbSet<ComboItem> ComboItems => Set<ComboItem>();
     public DbSet<OutboxEvent> OutboxEvents => Set<OutboxEvent>();
     public DbSet<Supervisor> Supervisors => Set<Supervisor>();
     public DbSet<StoreRegistrationRequest> StoreRegistrationRequests => Set<StoreRegistrationRequest>();
@@ -47,6 +49,8 @@ public class AppDbContext : DbContext
         ConfigureUser(modelBuilder);
         ConfigureCustomer(modelBuilder);
         ConfigureCustomerAddress(modelBuilder);
+        ConfigureCombo(modelBuilder);
+        ConfigureComboItem(modelBuilder);
         ConfigureOutboxEvent(modelBuilder);
         ConfigureSupervisor(modelBuilder);
         ConfigureStoreRegistrationRequest(modelBuilder);
@@ -356,6 +360,48 @@ public class AppDbContext : DbContext
                 .OnDelete(DeleteBehavior.Restrict);
 
             b.HasIndex(x => new { x.StoreId, x.CustomerId });
+        });
+    }
+
+    private static void ConfigureCombo(ModelBuilder mb)
+    {
+        mb.Entity<Combo>(b =>
+        {
+            b.ToTable("combos");
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Name).IsRequired().HasMaxLength(200);
+            b.Property(x => x.Description).HasMaxLength(1000);
+            b.Property(x => x.Price).HasColumnType("numeric(18,2)");
+
+            b.HasOne(x => x.Store)
+                .WithMany()
+                .HasForeignKey(x => x.StoreId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            b.HasIndex(x => new { x.StoreId, x.IsActive });
+            b.HasIndex(x => new { x.StoreId, x.DisplayOrder });
+        });
+    }
+
+    private static void ConfigureComboItem(ModelBuilder mb)
+    {
+        mb.Entity<ComboItem>(b =>
+        {
+            b.ToTable("combo_items");
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Label).IsRequired().HasMaxLength(100);
+
+            b.HasOne(x => x.Combo)
+                .WithMany(c => c.Items)
+                .HasForeignKey(x => x.ComboId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            b.HasOne(x => x.Category)
+                .WithMany()
+                .HasForeignKey(x => x.CategoryId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            b.HasIndex(x => new { x.StoreId, x.ComboId });
         });
     }
 
