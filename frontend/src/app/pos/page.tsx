@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Plus, Users } from "lucide-react";
 import { useStoreApi } from "@/lib/use-store-api";
+import { useAuth } from "@/lib/auth-context";
 import { OrderDto, TableDto, TableStatus } from "@/types/api";
 import { formatCurrency } from "@/lib/format";
 import { Badge } from "@/components/ui-v2/badge";
@@ -30,6 +31,8 @@ const STATUS_BADGE: Record<TableStatus, "secondary" | "default" | "outline"> = {
 };
 
 export default function PosTables() {
+  const { hasRole } = useAuth();
+  const isManager = hasRole("Manager");
   const tables = useStoreApi<TableDto[]>("/api/tables");
   const orders = useStoreApi<OrderDto[]>("/api/orders?status=Active");
 
@@ -69,13 +72,19 @@ export default function PosTables() {
         <EmptyState
           icon={Users}
           title="Tanımlı aktif masa yok"
-          description="Yönetici panelinden ilk masayı ekleyerek başlayın."
+          description={
+            isManager
+              ? "Yönetici panelinden ilk masayı ekleyerek başlayın."
+              : "Henüz masa tanımlı değil. Yöneticiden masa eklemesini isteyin."
+          }
           action={
-            <Button asChild>
-              <Link href="/admin/tables">
-                <Plus /> Masa ekle
-              </Link>
-            </Button>
+            isManager ? (
+              <Button asChild>
+                <Link href="/admin/tables">
+                  <Plus /> Masa ekle
+                </Link>
+              </Button>
+            ) : undefined
           }
         />
       ) : (
