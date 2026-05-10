@@ -1,6 +1,7 @@
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using PizzaPos.Api.Auth;
@@ -35,6 +36,14 @@ builder.Services.AddDbContext<AppDbContext>(opt =>
                 "Database connection string not configured. Set ConnectionStrings:Default or DATABASE_URL.");
         opt.UseNpgsql(connectionString);
     }
+
+    // Snapshot drift'i (eski model snapshot vs güncel ModelBuilder çıktısı) artık
+    // Migrate() sırasında crash sebebi (.NET 9+ default). DB şeması manuel DDL
+    // (AddCustomersAndOutbox + idempotent ALTER) ile zaten doğru — bu uyarıyı
+    // production'da log + devam, dev'de yine fail-fast bırakıyoruz.
+    if (!builder.Environment.IsDevelopment())
+        opt.ConfigureWarnings(w =>
+            w.Ignore(RelationalEventId.PendingModelChangesWarning));
 });
 
 // --- Tenancy ----------------------------------------------------------------
