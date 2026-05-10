@@ -35,4 +35,12 @@ public interface IOrderService
     /// olur (FK için), ProductName ve UnitPrice Combo'dan kopyalanır.
     /// </summary>
     Task<OrderDto> AddComboAsync(Guid orderId, AddComboToOrderRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// Masasız (Takeaway/Delivery) sipariş yaratır. Caller ID akışı ve genel
+    /// paket sipariş ekranı kullanır. CustomerId zorunlu; Delivery için
+    /// adres bilgisi (CustomerAddressId VEYA inline AddressLine) zorunlu.
+    /// IncomingCallId verilirse o çağrı otomatik Handled olarak işaretlenir.
+    /// </summary>
+    Task<OrderDto> CreateDeliveryAsync(CreateDeliveryOrderRequest request, CancellationToken ct = default);
 }

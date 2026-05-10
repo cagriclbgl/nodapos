@@ -21,3 +21,10 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
 asar: true
+# Native modüller (node-hid, usb) asar içinden çalışmaz — runtime'da
+# `.node` dosyalarına dosya yolu üzerinden erişilir, bu da asar'ın
+# desteklemediği bir mekanizma. Bu klasörler asar dışında bırakılır.
+asarUnpack:
+  - node_modules/node-hid/**
+  - node_modules/usb/**
+  - node_modules/@serialport/**

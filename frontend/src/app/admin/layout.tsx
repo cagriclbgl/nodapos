@@ -9,6 +9,8 @@ import {
   ClipboardList,
   LayoutGrid,
   Package,
+  Phone,
+  Settings,
   Sparkles,
   Tag,
   Users,
@@ -33,7 +35,9 @@ const NAV: NavItem[] = [
   { href: "/admin/tables", label: "Masalar", icon: LayoutGrid },
   { href: "/admin/orders", label: "Siparişler", icon: ClipboardList },
   { href: "/admin/customers", label: "Müşteriler", icon: Users },
+  { href: "/admin/calls", label: "Çağrılar", icon: Phone },
   { href: "/admin/users", label: "Kullanıcılar", icon: UserCog },
+  { href: "/admin/settings/caller-id", label: "Caller ID", icon: Settings },
 ];
 
 export default function AdminLayout({

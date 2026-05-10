@@ -8,16 +8,20 @@ import type {
   ComboDto,
   CreateComboRequest,
   CreateCustomerRequest,
+  CreateDeliveryOrderRequest,
   CreateStoreRegistrationRequest,
   CreateUserRequest,
   CustomerAddressDto,
   CustomerDto,
   CustomerListItemDto,
+  IncomingCallDto,
+  IncomingCallStatus,
   LoginRequest,
   LoginResponse,
   OrderDto,
   RejectRegistrationRequest,
   ResetPasswordRequest,
+  ResolveIncomingCallRequest,
   StoreDto,
   StoreOverviewDto,
   StoreRegistrationRequestDto,
@@ -28,6 +32,7 @@ import type {
   SupervisorSessionResponse,
   UpdateComboRequest,
   UpdateCustomerRequest,
+  UpdateIncomingCallNoteRequest,
   UpdateStoreRequest,
   UpdateUserRequest,
   UserDto,
@@ -201,8 +206,38 @@ export const combos = {
  * bir OrderItem yaratıp Notes alanına seçim özetini yazar.
  */
 export const orders = {
+  get: (id: string) => api.get<OrderDto>(`/api/orders/${id}`),
   addCombo: (orderId: string, req: AddComboToOrderRequest) =>
     api.post<OrderDto>(`/api/orders/${orderId}/combos`, req),
+  /** Masasız (paket / kurye) sipariş yaratır. Caller ID akışı ve "Paket" sekmesi kullanır. */
+  createDelivery: (req: CreateDeliveryOrderRequest) =>
+    api.post<OrderDto>("/api/orders/delivery", req),
+};
+
+/**
+ * Caller ID kaynaklı çağrı kayıtları. POST endpoint'i normalde Electron main
+ * process tarafından doldurulur (HID listener); UI sadece okur ve resolve eder.
+ */
+export const incomingCalls = {
+  list: (params?: {
+    from?: string;
+    to?: string;
+    status?: IncomingCallStatus;
+    limit?: number;
+  }) => {
+    const qs = new URLSearchParams();
+    if (params?.from) qs.set("from", params.from);
+    if (params?.to) qs.set("to", params.to);
+    if (params?.status) qs.set("status", params.status);
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return api.get<IncomingCallDto[]>(`/api/incoming-calls${suffix}`);
+  },
+  get: (id: string) => api.get<IncomingCallDto>(`/api/incoming-calls/${id}`),
+  resolve: (id: string, req: ResolveIncomingCallRequest) =>
+    api.patch<IncomingCallDto>(`/api/incoming-calls/${id}/resolve`, req),
+  updateNote: (id: string, req: UpdateIncomingCallNoteRequest) =>
+    api.patch<IncomingCallDto>(`/api/incoming-calls/${id}/note`, req),
 };
 
 /**

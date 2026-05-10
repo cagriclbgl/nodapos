@@ -35,6 +35,26 @@ public class Order : TenantEntity
     public DateTime? CancelledAt { get; set; }
 
     /// <summary>
+    /// Delivery (paket/kurye) sipariş için adres metni snapshot'ı. CustomerAddressId
+    /// silinse de bu metin korunur. DineIn/Takeaway için null.
+    /// </summary>
+    public string? DeliveryAddressSnapshot { get; set; }
+
+    public string? DeliveryDistrict { get; set; }
+
+    /// <summary>Mutfak / kurye akışı durumu. DineIn için kullanılmaz (Pending kalır).</summary>
+    public FulfillmentStatus FulfillmentStatus { get; set; } = FulfillmentStatus.Pending;
+
+    /// <summary>Atanmış kurye User Id. FK yok (audit korur). Null = atanmadı.</summary>
+    public Guid? AssignedCourierUserId { get; set; }
+
+    public DateTime? OutForDeliveryAt { get; set; }
+    public DateTime? DeliveredAt { get; set; }
+
+    /// <summary>Çağrıdan geldiyse ilgili IncomingCall.Id. FK yok.</summary>
+    public Guid? IncomingCallId { get; set; }
+
+    /// <summary>
     /// User (cashier/manager) who created the order. Stored without an FK constraint so
     /// the audit trail survives even if the User record is later deleted.
     /// </summary>

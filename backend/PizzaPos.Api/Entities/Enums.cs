@@ -42,3 +42,27 @@ public enum StoreRegistrationStatus
     Approved = 1,
     Rejected = 2
 }
+
+public enum IncomingCallStatus
+{
+    /// <summary>Çağrı geldi, kasiyer henüz cevaplamadı / bir aksiyon almadı.</summary>
+    New = 0,
+
+    /// <summary>Kasiyer çağrıyı bir Order'a bağladı (ResolvedOrderId set).</summary>
+    Handled = 1,
+
+    /// <summary>Belli bir süre cevaplanmadı (kasa otomatik) veya kasiyer "Cevapsız" işaretledi.</summary>
+    Missed = 2,
+
+    /// <summary>Kasiyer çağrıyı bilinçli olarak görmezden geldi (yeni sipariş istemiyor vb.).</summary>
+    Ignored = 3,
+}
+
+public enum FulfillmentStatus
+{
+    Pending = 0,
+    InKitchen = 1,
+    Ready = 2,
+    OutForDelivery = 3,
+    Delivered = 4,
+}

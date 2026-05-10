@@ -658,6 +658,150 @@ public class OrderService : IOrderService
         return (await GetAsync(orderInfo.Id, ct))!;
     }
 
+    public async Task<OrderDto> CreateDeliveryAsync(
+        CreateDeliveryOrderRequest request, CancellationToken ct = default)
+    {
+        if (request.Items is null || request.Items.Count == 0)
+            throw new DomainException("Order must contain at least one item.");
+        if (request.OrderType is not (OrderType.Takeaway or OrderType.Delivery))
+            throw new DomainException("CreateDelivery only supports Takeaway or Delivery order types.");
+
+        var customer = await _db.Customers
+            .Include(c => c.Addresses)
+            .FirstOrDefaultAsync(c => c.Id == request.CustomerId, ct)
+            ?? throw DomainException.NotFound("Customer");
+
+        // Delivery: adres metni zorunlu (CustomerAddress'ten snapshot ya da inline).
+        string? addressSnapshot = null;
+        string? addressDistrict = null;
+        Guid? customerAddressId = null;
+
+        if (request.OrderType == OrderType.Delivery)
+        {
+            if (request.CustomerAddressId.HasValue)
+            {
+                var addr = customer.Addresses.FirstOrDefault(a => a.Id == request.CustomerAddressId.Value)
+                    ?? throw DomainException.NotFound("CustomerAddress");
+                addressSnapshot = addr.AddressLine;
+                addressDistrict = addr.District;
+                customerAddressId = addr.Id;
+            }
+            else if (!string.IsNullOrWhiteSpace(request.AddressLine))
+            {
+                addressSnapshot = request.AddressLine.Trim();
+                addressDistrict = string.IsNullOrWhiteSpace(request.District) ? null : request.District.Trim();
+            }
+            else
+            {
+                throw new DomainException(
+                    "Delivery siparişi için CustomerAddressId veya AddressLine zorunlu.");
+            }
+        }
+
+        var order = new Order
+        {
+            OrderNumber = GenerateOrderNumber(),
+            TableId = null,
+            OrderType = request.OrderType,
+            Status = OrderStatus.Active,
+            CustomerId = customer.Id,
+            CustomerAddressId = customerAddressId,
+            CustomerName = customer.Name,                     // SNAPSHOT
+            CustomerPhone = customer.Phone,                   // SNAPSHOT
+            DeliveryAddressSnapshot = addressSnapshot,        // SNAPSHOT
+            DeliveryDistrict = addressDistrict,
+            FulfillmentStatus = FulfillmentStatus.Pending,
+            IncomingCallId = request.IncomingCallId,
+            Notes = string.IsNullOrWhiteSpace(request.Notes) ? null : request.Notes.Trim(),
+            DiscountAmount = request.DiscountAmount < 0 ? 0 : request.DiscountAmount,
+            CreatedByUserId = _currentUser.UserId,
+        };
+
+        await using var tx = await _db.Database.BeginTransactionAsync(ct);
+
+        _db.Orders.Add(order);
+
+        foreach (var line in request.Items)
+            await BuildAndAttachItemAsync(order, line, ct);
+
+        RecalculateTotals(order);
+
+        await _db.SaveChangesAsync(ct);
+
+        // Çağrıdan geldiyse o çağrıyı Handled olarak bağla.
+        if (request.IncomingCallId.HasValue)
+        {
+            var now = DateTime.UtcNow;
+            await _db.IncomingCalls
+                .Where(c => c.Id == request.IncomingCallId.Value)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(c => c.Status, IncomingCallStatus.Handled)
+                    .SetProperty(c => c.ResolvedOrderId, (Guid?)order.Id)
+                    .SetProperty(c => c.HandledByUserId, _currentUser.UserId)
+                    .SetProperty(c => c.HandledAt, (DateTime?)now)
+                    .SetProperty(c => c.UpdatedAt, (DateTime?)now), ct);
+
+            await _outbox.EmitAsync("IncomingCall", request.IncomingCallId.Value, "IncomingCallResolved",
+                new
+                {
+                    id = request.IncomingCallId.Value,
+                    storeId = order.StoreId,
+                    status = IncomingCallStatus.Handled,
+                    resolvedOrderId = order.Id,
+                    handledByUserId = _currentUser.UserId,
+                    handledAt = now,
+                    updatedAt = now,
+                }, ct);
+        }
+
+        await _outbox.EmitAsync("Order", order.Id, "OrderCreated",
+            new
+            {
+                order.Id,
+                order.StoreId,
+                order.OrderNumber,
+                order.TableId,
+                order.OrderType,
+                status = order.Status,
+                order.Subtotal,
+                order.DiscountAmount,
+                order.Total,
+                order.CustomerId,
+                order.CustomerName,
+                order.CustomerPhone,
+                order.Notes,
+                order.CreatedByUserId,
+                createdAt = order.CreatedAt,
+                deliveryAddressSnapshot = order.DeliveryAddressSnapshot,
+                deliveryDistrict = order.DeliveryDistrict,
+                fulfillmentStatus = order.FulfillmentStatus,
+                incomingCallId = order.IncomingCallId,
+                items = order.Items.Select(i => new
+                {
+                    i.Id,
+                    i.ProductId,
+                    i.ProductName,
+                    i.UnitPrice,
+                    i.Quantity,
+                    i.LineTotal,
+                    i.Notes,
+                    options = i.Options.Select(o => new
+                    {
+                        o.Id,
+                        o.ProductOptionId,
+                        o.GroupName,
+                        o.OptionName,
+                        o.AdditionalPrice
+                    })
+                })
+            }, ct);
+        await _db.SaveChangesAsync(ct);
+
+        await tx.CommitAsync(ct);
+
+        return (await GetAsync(order.Id, ct))!;
+    }
+
     public async Task<OrderDto> CancelAsync(Guid orderId, CancellationToken ct = default)
     {
         var orderInfo = await _db.Orders
@@ -796,7 +940,14 @@ public class OrderService : IOrderService
             o.CompletedAt,
             o.CancelledAt,
             o.Items.Select(MapItem).ToList(),
-            o.Payments.OrderBy(p => p.PaidAt).Select(MapPayment).ToList());
+            o.Payments.OrderBy(p => p.PaidAt).Select(MapPayment).ToList(),
+            o.DeliveryAddressSnapshot,
+            o.DeliveryDistrict,
+            o.FulfillmentStatus,
+            o.AssignedCourierUserId,
+            o.OutForDeliveryAt,
+            o.DeliveredAt,
+            o.IncomingCallId);
 
     private static OrderItemDto MapItem(OrderItem i) =>
         new(

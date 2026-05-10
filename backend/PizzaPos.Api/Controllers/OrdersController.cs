@@ -39,6 +39,18 @@ public class OrdersController : TenantControllerBase
         return CreatedAtAction(nameof(Get), new { id = created.Id }, created);
     }
 
+    /// <summary>
+    /// Masasız (paket / kurye) sipariş yaratır. Caller ID akışı ve kasa "Paket"
+    /// sekmesi kullanır. CustomerId zorunlu; Delivery için adres bilgisi zorunlu.
+    /// </summary>
+    [HttpPost("delivery")]
+    public async Task<ActionResult<OrderDto>> CreateDelivery(
+        [FromBody] CreateDeliveryOrderRequest request, CancellationToken ct)
+    {
+        var created = await _service.CreateDeliveryAsync(request, ct);
+        return CreatedAtAction(nameof(Get), new { id = created.Id }, created);
+    }
+
     [HttpPost("{id:guid}/items")]
     public async Task<ActionResult<OrderDto>> AddItem(
         Guid id, [FromBody] AddOrderItemRequest request, CancellationToken ct)

@@ -67,6 +67,10 @@ public class IngestApplyService : IIngestApplyService
                 case "CustomerAddressUpdated":    await ApplyCustomerAddressUpsertAsync(data, ct, isCreate: false); break;
                 case "CustomerAddressDeleted":    await ApplyCustomerAddressDeletedAsync(data, ct); break;
 
+                case "IncomingCallReceived":      await ApplyIncomingCallReceivedAsync(data, ct); break;
+                case "IncomingCallResolved":      await ApplyIncomingCallResolvedAsync(data, ct); break;
+                case "IncomingCallNoteUpdated":   await ApplyIncomingCallNoteUpdatedAsync(data, ct); break;
+
                 default:
                     _logger.LogWarning("IngestApply: unknown event type {EventType} (id={Id})",
                         evt.EventType, evt.Id);
@@ -117,6 +121,12 @@ public class IngestApplyService : IIngestApplyService
             Notes = TryGetString(data, "notes"),
             CreatedByUserId = TryGetGuid(data, "createdByUserId"),
             CreatedAt = TryGetDateTime(data, "createdAt") ?? DateTime.UtcNow,
+            DeliveryAddressSnapshot = TryGetString(data, "deliveryAddressSnapshot"),
+            DeliveryDistrict = TryGetString(data, "deliveryDistrict"),
+            FulfillmentStatus = data.TryGetProperty("fulfillmentStatus", out var fs)
+                && fs.ValueKind == JsonValueKind.Number
+                ? (FulfillmentStatus)fs.GetInt32() : FulfillmentStatus.Pending,
+            IncomingCallId = TryGetGuid(data, "incomingCallId"),
         };
 
         _db.Orders.Add(order);
@@ -441,6 +451,68 @@ public class IngestApplyService : IIngestApplyService
         await _db.CustomerAddresses.IgnoreQueryFilters()
             .Where(a => a.Id == id)
             .ExecuteDeleteAsync(ct);
+    }
+
+    // --- IncomingCall handlers ---------------------------------------------
+
+    private async Task ApplyIncomingCallReceivedAsync(JsonElement data, CancellationToken ct)
+    {
+        var id = data.GetProperty("id").GetGuid();
+        var exists = await _db.IncomingCalls.IgnoreQueryFilters()
+            .AnyAsync(c => c.Id == id, ct);
+        if (exists) return;
+
+        var storeId = data.GetProperty("storeId").GetGuid();
+        _db.IncomingCalls.Add(new IncomingCall
+        {
+            Id = id,
+            StoreId = storeId,
+            Phone = TryGetString(data, "phone"),
+            LineNumber = data.TryGetProperty("lineNumber", out var ln) && ln.ValueKind == JsonValueKind.Number
+                ? ln.GetInt32() : null,
+            ReceivedAt = TryGetDateTime(data, "receivedAt") ?? DateTime.UtcNow,
+            MatchedCustomerId = TryGetGuid(data, "matchedCustomerId"),
+            Status = data.TryGetProperty("status", out var st) && st.ValueKind == JsonValueKind.Number
+                ? (IncomingCallStatus)st.GetInt32() : IncomingCallStatus.New,
+            CreatedAt = TryGetDateTime(data, "createdAt") ?? DateTime.UtcNow,
+        });
+        await _db.SaveChangesAsync(ct);
+    }
+
+    private async Task ApplyIncomingCallResolvedAsync(JsonElement data, CancellationToken ct)
+    {
+        var id = data.GetProperty("id").GetGuid();
+        var status = data.TryGetProperty("status", out var st) && st.ValueKind == JsonValueKind.Number
+            ? (IncomingCallStatus)st.GetInt32() : IncomingCallStatus.Handled;
+        var resolvedOrderId = TryGetGuid(data, "resolvedOrderId");
+        var handledByUserId = TryGetGuid(data, "handledByUserId");
+        var handledAt = TryGetDateTime(data, "handledAt");
+        var updatedAt = TryGetDateTime(data, "updatedAt") ?? DateTime.UtcNow;
+
+        var rows = await _db.IncomingCalls.IgnoreQueryFilters()
+            .Where(c => c.Id == id)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(c => c.Status, status)
+                .SetProperty(c => c.ResolvedOrderId, resolvedOrderId)
+                .SetProperty(c => c.HandledByUserId, handledByUserId)
+                .SetProperty(c => c.HandledAt, handledAt)
+                .SetProperty(c => c.UpdatedAt, (DateTime?)updatedAt), ct);
+
+        if (rows == 0)
+            _logger.LogWarning("IncomingCallResolved: call {Id} not found in cloud — possibly applied before Received event.", id);
+    }
+
+    private async Task ApplyIncomingCallNoteUpdatedAsync(JsonElement data, CancellationToken ct)
+    {
+        var id = data.GetProperty("id").GetGuid();
+        var note = TryGetString(data, "note");
+        var updatedAt = TryGetDateTime(data, "updatedAt") ?? DateTime.UtcNow;
+
+        await _db.IncomingCalls.IgnoreQueryFilters()
+            .Where(c => c.Id == id)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(c => c.Note, note)
+                .SetProperty(c => c.UpdatedAt, (DateTime?)updatedAt), ct);
     }
 
     // --- Helpers ------------------------------------------------------------

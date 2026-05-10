@@ -4,6 +4,8 @@ import Link from "next/link";
 import { AuthGuard } from "@/components/AuthGuard";
 import { UserMenu } from "@/components/UserMenu";
 import { useAuth } from "@/lib/auth-context";
+import { IncomingCallProvider } from "@/lib/incoming-call-listener";
+import { IncomingCallModal } from "@/components/incoming-call/IncomingCallModal";
 
 export default function PosLayout({
   children,
@@ -12,18 +14,29 @@ export default function PosLayout({
 }) {
   return (
     <AuthGuard>
-      <div className="flex min-h-screen flex-col">
-        <header className="flex items-center justify-between border-b border-zinc-200 bg-white px-6 py-3 dark:border-zinc-800 dark:bg-zinc-950">
-          <div className="flex items-center gap-3">
-            <h1 className="text-lg font-semibold">Kasa</h1>
-          </div>
-          <div className="flex items-center gap-4">
-            <ManagerLink />
-            <UserMenu />
-          </div>
-        </header>
-        <main className="flex-1">{children}</main>
-      </div>
+      <IncomingCallProvider>
+        <div className="flex min-h-screen flex-col">
+          <header className="flex items-center justify-between border-b border-zinc-200 bg-white px-6 py-3 dark:border-zinc-800 dark:bg-zinc-950">
+            <div className="flex items-center gap-3">
+              <h1 className="text-lg font-semibold">Kasa</h1>
+              <Link
+                href="/pos/calls"
+                className="text-xs text-muted-foreground hover:text-foreground"
+              >
+                Çağrılar
+              </Link>
+            </div>
+            <div className="flex items-center gap-4">
+              <ManagerLink />
+              <UserMenu />
+            </div>
+          </header>
+          <main className="flex-1">{children}</main>
+          {/* Caller ID kutusundan gelen çağrı için global modal — pencerede her
+              yerde aktif (masa ekranı, sipariş ekranı vb.). */}
+          <IncomingCallModal />
+        </div>
+      </IncomingCallProvider>
     </AuthGuard>
   );
 }

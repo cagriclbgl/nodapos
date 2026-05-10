@@ -1,10 +1,12 @@
-import { app, BrowserWindow, dialog } from "electron";
+import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { spawn, ChildProcess } from "child_process";
 import * as path from "path";
 import * as fs from "fs";
 import * as crypto from "crypto";
 import getPort from "get-port";
 import waitOn from "wait-on";
+import { CallerIdListener } from "./hid/caller-id-listener";
+import { IncomingCallBridge } from "./services/incoming-call-bridge";
 
 let apiProcess: ChildProcess | null = null;
 let frontendProcess: ChildProcess | null = null;
@@ -12,6 +14,7 @@ let mainWindow: BrowserWindow | null = null;
 let logStream: fs.WriteStream | null = null;
 let apiCrashCount = 0;
 let frontendCrashCount = 0;
+let callerIdListener: CallerIdListener | null = null;
 const MAX_CRASHES = 3;
 
 function log(msg: string) {
@@ -202,6 +205,47 @@ async function createWindow(frontendPort: number) {
   await mainWindow.loadURL(url);
 }
 
+/**
+ * USB HID Caller ID kutusunu (1A86:E008) dinler, çağrıları backend'e
+ * POST /api/incoming-calls ile düşürür ve renderer'a IPC ile yayar.
+ *
+ * Pencere oluştuktan SONRA başlatılır — IPC broadcast yapılırken en az bir
+ * BrowserWindow olması, ilk eventlerin kaybolmamasını garanti eder.
+ */
+function startCallerIdListener(apiPort: number): void {
+  if (callerIdListener) return;
+  const apiBaseUrl = `http://127.0.0.1:${apiPort}`;
+  const listener = new CallerIdListener({ log });
+  const bridge = new IncomingCallBridge(listener, { apiBaseUrl, log });
+  bridge.install();
+
+  ipcMain.handle("caller-id:rescan", () => {
+    listener.rescan();
+    return { ok: true };
+  });
+  ipcMain.handle("caller-id:list-devices", async () => {
+    const devices = await listener.listAllDevices();
+    // Native HID nesneleri JSON-serializable değil — sadece güvenli alanları gönder.
+    return devices.map((d) => ({
+      vendorId: d.vendorId,
+      productId: d.productId,
+      product: d.product,
+      manufacturer: d.manufacturer,
+      serialNumber: d.serialNumber,
+      path: d.path,
+      usagePage: d.usagePage,
+      usage: d.usage,
+    }));
+  });
+  ipcMain.handle("caller-id:set-test-mode", (_e, active: boolean) => {
+    listener.setTestMode(active);
+    return { ok: true };
+  });
+
+  listener.start();
+  callerIdListener = listener;
+}
+
 app.whenReady().then(async () => {
   ensureLog();
   try {
@@ -213,6 +257,8 @@ app.whenReady().then(async () => {
       log("Dev mode: skipping bundled frontend, expecting Next dev server on 3000.");
     }
     await createWindow(frontendPort);
+    // Caller ID listener pencere açıldıktan SONRA — IPC broadcast'ı için.
+    startCallerIdListener(apiPort);
   } catch (err) {
     log(`Startup failed: ${err}`);
     dialog.showErrorBox("PizzaPos başlatılamadı", String(err));
@@ -221,6 +267,14 @@ app.whenReady().then(async () => {
 });
 
 app.on("before-quit", () => {
+  if (callerIdListener) {
+    try {
+      callerIdListener.stop();
+    } catch {
+      /* ignore */
+    }
+    callerIdListener = null;
+  }
   for (const [name, child] of [
     ["frontend", frontendProcess],
     ["api", apiProcess],

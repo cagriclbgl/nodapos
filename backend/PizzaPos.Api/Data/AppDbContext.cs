@@ -32,6 +32,7 @@ public class AppDbContext : DbContext
     public DbSet<Supervisor> Supervisors => Set<Supervisor>();
     public DbSet<StoreRegistrationRequest> StoreRegistrationRequests => Set<StoreRegistrationRequest>();
     public DbSet<SyncState> SyncStates => Set<SyncState>();
+    public DbSet<IncomingCall> IncomingCalls => Set<IncomingCall>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -55,6 +56,7 @@ public class AppDbContext : DbContext
         ConfigureSupervisor(modelBuilder);
         ConfigureStoreRegistrationRequest(modelBuilder);
         ConfigureSyncState(modelBuilder);
+        ConfigureIncomingCall(modelBuilder);
 
         ApplyTenantQueryFilters(modelBuilder);
     }
@@ -217,6 +219,37 @@ public class AppDbContext : DbContext
             b.HasIndex(x => new { x.StoreId, x.OrderNumber }).IsUnique();
             // Used by /api/customers/{id}/orders to fetch a customer's order history.
             b.HasIndex(x => new { x.StoreId, x.CustomerId });
+
+            // Delivery flow (Sprint B) alanları.
+            b.Property(x => x.DeliveryAddressSnapshot).HasMaxLength(500);
+            b.Property(x => x.DeliveryDistrict).HasMaxLength(100);
+            b.Property(x => x.FulfillmentStatus).HasConversion<int>();
+            b.HasIndex(x => new { x.StoreId, x.OrderType, x.FulfillmentStatus });
+        });
+    }
+
+    private static void ConfigureIncomingCall(ModelBuilder mb)
+    {
+        mb.Entity<IncomingCall>(b =>
+        {
+            b.ToTable("incoming_calls");
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Phone).HasMaxLength(50);
+            b.Property(x => x.Note).HasMaxLength(500);
+            b.Property(x => x.RawPayloadHex).HasMaxLength(2000);
+            b.Property(x => x.Status).HasConversion<int>();
+
+            b.HasOne(x => x.Store)
+                .WithMany()
+                .HasForeignKey(x => x.StoreId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // /pos/calls bugünkü çağrılar listesi: store + tarih azalan.
+            b.HasIndex(x => new { x.StoreId, x.ReceivedAt });
+            // /admin/calls duruma göre filtreleme.
+            b.HasIndex(x => new { x.StoreId, x.Status, x.ReceivedAt });
+            // Bir müşterinin son çağrı geçmişine bakmak için.
+            b.HasIndex(x => new { x.StoreId, x.MatchedCustomerId });
         });
     }
 

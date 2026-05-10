@@ -240,6 +240,14 @@ export interface OrderDto {
   cancelledAt?: string | null;
   items: OrderItemDto[];
   payments: PaymentDto[];
+  // Delivery (Sprint B) — DineIn için tamamı null/Pending kalır.
+  deliveryAddressSnapshot?: string | null;
+  deliveryDistrict?: string | null;
+  fulfillmentStatus?: FulfillmentStatus;
+  assignedCourierUserId?: string | null;
+  outForDeliveryAt?: string | null;
+  deliveredAt?: string | null;
+  incomingCallId?: string | null;
 }
 
 export interface CreateOrderRequest {
@@ -444,4 +452,68 @@ export interface SupervisorCreateUserRequest {
   fullName: string;
   password: string;
   role: UserRole;
+}
+
+// --- Caller ID & Incoming Calls --------------------------------------------
+
+export type IncomingCallStatus = "New" | "Handled" | "Missed" | "Ignored";
+export type FulfillmentStatus =
+  | "Pending"
+  | "InKitchen"
+  | "Ready"
+  | "OutForDelivery"
+  | "Delivered";
+
+export interface CustomerSummaryDto {
+  id: string;
+  name: string;
+  phone: string;
+  defaultAddressLine: string | null;
+  defaultAddressDistrict: string | null;
+}
+
+export interface RecentOrderSummaryDto {
+  id: string;
+  orderNumber: string;
+  createdAt: string;
+  total: number;
+  status: OrderStatus;
+  orderType: OrderType;
+}
+
+export interface IncomingCallDto {
+  id: string;
+  phone: string | null;
+  lineNumber: number | null;
+  receivedAt: string;
+  status: IncomingCallStatus;
+  matchedCustomerId: string | null;
+  resolvedOrderId: string | null;
+  handledAt: string | null;
+  note: string | null;
+  matchedCustomer: CustomerSummaryDto | null;
+  recentOrders: RecentOrderSummaryDto[];
+}
+
+export interface ResolveIncomingCallRequest {
+  orderId?: string | null;
+  status?: IncomingCallStatus | null;
+}
+
+export interface UpdateIncomingCallNoteRequest {
+  note: string | null;
+}
+
+// --- Delivery (Sprint B) ---------------------------------------------------
+
+export interface CreateDeliveryOrderRequest {
+  orderType: "Takeaway" | "Delivery";
+  customerId: string;
+  customerAddressId?: string | null;
+  addressLine?: string | null;
+  district?: string | null;
+  notes?: string | null;
+  discountAmount: number;
+  items: AddOrderItemRequest[];
+  incomingCallId?: string | null;
 }

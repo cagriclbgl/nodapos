@@ -19,7 +19,38 @@ public record OrderDto(
     DateTime? CompletedAt,
     DateTime? CancelledAt,
     IReadOnlyList<OrderItemDto> Items,
-    IReadOnlyList<PaymentDto> Payments);
+    IReadOnlyList<PaymentDto> Payments,
+    string? DeliveryAddressSnapshot = null,
+    string? DeliveryDistrict = null,
+    FulfillmentStatus FulfillmentStatus = FulfillmentStatus.Pending,
+    Guid? AssignedCourierUserId = null,
+    DateTime? OutForDeliveryAt = null,
+    DateTime? DeliveredAt = null,
+    Guid? IncomingCallId = null);
+
+/// <summary>
+/// POST /api/orders/delivery — masasız (Takeaway/Delivery) sipariş yaratır.
+/// CustomerId zorunlu (telefondan gelen kayıtlı müşteriler içindir); Delivery
+/// için adres bilgisi de zorunlu (CustomerAddressId VEYA inline AddressLine).
+/// </summary>
+public record CreateDeliveryOrderRequest(
+    OrderType OrderType,
+    Guid CustomerId,
+    Guid? CustomerAddressId,
+    string? AddressLine,
+    string? District,
+    string? Notes,
+    decimal DiscountAmount,
+    IReadOnlyList<AddOrderItemRequest> Items,
+    Guid? IncomingCallId = null);
+
+/// <summary>
+/// PATCH /api/orders/{id}/fulfillment — Pending → InKitchen → Ready → OutForDelivery → Delivered.
+/// CourierUserId yalnızca OutForDelivery'ye geçerken anlamlı.
+/// </summary>
+public record UpdateFulfillmentStatusRequest(
+    FulfillmentStatus Status,
+    Guid? CourierUserId);
 
 public record OrderItemDto(
     Guid Id,
