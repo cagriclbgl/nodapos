@@ -33,7 +33,13 @@ public static class AuthCookie
     {
         HttpOnly = true,
         IsEssential = true,
-        SameSite = SameSiteMode.Lax,
+        // Production deploy: frontend (Vercel: nodapos.com) ile API
+        // (Hetzner: api.nodapos.com) farklı subdomain'lerde, yani cross-site.
+        // SameSite=Lax cross-site fetch'lerde cookie göndermez → login geçer
+        // ama sonraki API çağrılarında 401 patlar. None+Secure şart.
+        // Development'ta (kasa lokal localhost:3000 ↔ :5000) Lax yeterli ve
+        // bazı browser'lar localhost'u esnek saydığı için sorun çıkmaz.
+        SameSite = env.IsDevelopment() ? SameSiteMode.Lax : SameSiteMode.None,
         Secure = !env.IsDevelopment(),
         Path = "/",
         Expires = expiresAtUtc,
@@ -43,7 +49,7 @@ public static class AuthCookie
     {
         HttpOnly = true,
         IsEssential = true,
-        SameSite = SameSiteMode.Lax,
+        SameSite = env.IsDevelopment() ? SameSiteMode.Lax : SameSiteMode.None,
         Secure = !env.IsDevelopment(),
         Path = "/",
     };
