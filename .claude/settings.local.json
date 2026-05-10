@@ -10,7 +10,8 @@
       "Bash(taskkill /IM electron.exe /F)",
       "Bash(taskkill /IM PizzaPos.Api.exe /F)",
       "Bash(rm -f \"C:/Users/w11/AppData/Roaming/pizzapos-desktop/pos.db\")",
-      "Read(//c/Users/w11/AppData/Roaming/pizzapos-desktop/**)"
+      "Read(//c/Users/w11/AppData/Roaming/pizzapos-desktop/**)",
+      "Bash(npm run *)"
     ]
   }
 }

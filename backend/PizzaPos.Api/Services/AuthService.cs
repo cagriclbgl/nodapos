@@ -19,28 +19,44 @@ public class AuthService : IAuthService
     public async Task<(User user, Store store, LoginResponse response)> LoginAsync(
         LoginRequest request, CancellationToken ct = default)
     {
-        if (request.StoreId == Guid.Empty)
-            throw new DomainException("StoreId is required.");
         if (string.IsNullOrWhiteSpace(request.Username))
             throw new DomainException("Username is required.");
         if (string.IsNullOrWhiteSpace(request.Password))
             throw new DomainException("Password is required.");
 
-        var store = await _db.Stores.FindAsync([request.StoreId], ct)
-            ?? throw DomainException.NotFound("Store");
-
-        // Authenticated session is not yet established at login, so the Global
-        // Query Filter has no tenant. IgnoreQueryFilters + explicit StoreId
-        // predicate keeps the check tenant-scoped without trusting any header.
         var username = request.Username.Trim();
-        var user = await _db.Users
-            .IgnoreQueryFilters()
-            .FirstOrDefaultAsync(u =>
-                u.StoreId == store.Id &&
-                u.Username == username, ct);
 
-        if (user is null || !user.IsActive || !_hasher.Verify(request.Password, user.PasswordHash))
+        // Single-step lookup: pull every active user with this username across
+        // all tenants. (StoreId, Username) is unique inside a store, but the
+        // username itself is NOT globally unique — same login name could exist
+        // in two different stores. Resolve the ambiguity below.
+        var query = _db.Users
+            .IgnoreQueryFilters()
+            .Where(u => u.Username == username && u.IsActive);
+        if (request.StoreId is Guid scopedStoreId && scopedStoreId != Guid.Empty)
+            query = query.Where(u => u.StoreId == scopedStoreId);
+
+        var candidates = await query.ToListAsync(ct);
+        if (candidates.Count == 0)
             throw new DomainException("Invalid username or password.", 401);
+
+        // Match password — only one candidate's hash should validate. Using
+        // a per-row check (not breaking out early) keeps timing roughly
+        // constant for the wrong-password path across 1 vs N candidates.
+        var matched = candidates
+            .Where(u => _hasher.Verify(request.Password, u.PasswordHash))
+            .ToList();
+
+        if (matched.Count == 0)
+            throw new DomainException("Invalid username or password.", 401);
+        if (matched.Count > 1)
+            // Disambiguate: client should call again with StoreId set.
+            throw DomainException.Conflict(
+                "This username exists in multiple stores. Please pick a store and retry.");
+
+        var user = matched[0];
+        var store = await _db.Stores.FindAsync([user.StoreId], ct)
+            ?? throw DomainException.NotFound("Store");
 
         // Bump LastLoginAt via raw UPDATE (pooler-safe; mirrors OrderService convention).
         var now = DateTime.UtcNow;

@@ -24,16 +24,26 @@ import {
   SelectValue,
 } from "@/components/ui-v2/select";
 
+/**
+ * Username + password only. Server resolves the store automatically when the
+ * username is unambiguous (vast majority of cases — one cashier, one store).
+ *
+ * If the same username exists in multiple stores, the server returns 409 and
+ * we surface a store dropdown for disambiguation. The dropdown stays hidden
+ * by default so the common case is a clean two-field form.
+ */
 export default function LoginPage() {
   const router = useRouter();
   const { user, loading: authLoading, login } = useAuth();
 
-  const [stores, setStores] = useState<StoreSummaryDto[]>([]);
-  const [storeId, setStoreId] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [storeId, setStoreId] = useState("");
 
-  const [storesError, setStoresError] = useState<string | null>(null);
+  const [needStorePicker, setNeedStorePicker] = useState(false);
+  const [stores, setStores] = useState<StoreSummaryDto[]>([]);
+  const [storesLoading, setStoresLoading] = useState(false);
+
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -42,41 +52,58 @@ export default function LoginPage() {
     router.replace(user.role === "Manager" ? "/admin" : "/pos");
   }, [authLoading, user, router]);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const list = await api.get<StoreSummaryDto[]>("/api/stores");
-        if (cancelled) return;
-        setStores(list);
-        if (list.length === 1) setStoreId(list[0].id);
-      } catch (err) {
-        if (cancelled) return;
-        setStoresError(
-          err instanceof ApiError ? err.detail || err.message : String(err)
-        );
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!storeId || !username || !password) return;
+    if (!username || !password) return;
+    if (needStorePicker && !storeId) {
+      setSubmitError("Lütfen bir mağaza seç.");
+      return;
+    }
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const res = await login({ storeId, username, password });
+      const res = await login({
+        username,
+        password,
+        ...(storeId ? { storeId } : {}),
+      });
       router.replace(res.user.role === "Manager" ? "/admin" : "/pos");
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.status === 401) {
-          setSubmitError("Hatalı kullanıcı veya şifre.");
+          setSubmitError("Hatalı kullanıcı adı veya şifre.");
+        } else if (err.status === 409) {
+          // Multiple stores have this username — surface the picker.
+          setNeedStorePicker(true);
+          setSubmitError("Bu kullanıcı birden fazla mağazada bulundu. Mağaza seç ve tekrar dene.");
+          // Lazy-load store list only when we actually need it.
+          if (stores.length === 0) {
+            setStoresLoading(true);
+            try {
+              const list = await api.get<StoreSummaryDto[]>("/api/stores");
+              setStores(list);
+            } catch {
+              /* ignore — user will see error on next submit if list still empty */
+            } finally {
+              setStoresLoading(false);
+            }
+          }
         } else if (err.status === 423) {
-          router.push(`/setup?storeId=${encodeURIComponent(storeId)}`);
-          return;
+          // First-Manager bootstrap path needs an explicit store.
+          if (!storeId) {
+            setSubmitError("İlk Manager kurulumu için mağaza seçimi gerekli.");
+            setNeedStorePicker(true);
+            if (stores.length === 0) {
+              try {
+                const list = await api.get<StoreSummaryDto[]>("/api/stores");
+                setStores(list);
+              } catch {
+                /* ignore */
+              }
+            }
+          } else {
+            router.push(`/setup?storeId=${encodeURIComponent(storeId)}`);
+          }
         } else {
           setSubmitError(err.detail || err.message);
         }
@@ -98,42 +125,12 @@ export default function LoginPage() {
           <div>
             <CardTitle>PizzaPos Giriş</CardTitle>
             <CardDescription className="mt-1">
-              Mağazanızı seçin ve kullanıcı bilgilerinizle giriş yapın.
+              Kullanıcı adın ve şifrenle giriş yap.
             </CardDescription>
           </div>
         </CardHeader>
         <CardContent>
           <form className="space-y-4" onSubmit={onSubmit}>
-            {storesError && (
-              <div className="rounded-md border border-destructive/30 bg-destructive/10 p-2.5 text-sm text-destructive">
-                Mağazalar yüklenemedi: {storesError}
-              </div>
-            )}
-
-            <div className="space-y-1.5">
-              <Label htmlFor="store">Mağaza</Label>
-              <Select
-                value={storeId}
-                onValueChange={setStoreId}
-                disabled={submitting || stores.length === 0}
-              >
-                <SelectTrigger id="store">
-                  <SelectValue
-                    placeholder={
-                      stores.length === 0 ? "Mağaza bulunamadı" : "Mağaza seçin..."
-                    }
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  {stores.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>
-                      {s.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
             <div className="space-y-1.5">
               <Label htmlFor="username">Kullanıcı Adı</Label>
               <Input
@@ -143,6 +140,7 @@ export default function LoginPage() {
                 onChange={(e) => setUsername(e.target.value)}
                 required
                 disabled={submitting}
+                autoFocus
               />
             </div>
 
@@ -159,6 +157,36 @@ export default function LoginPage() {
               />
             </div>
 
+            {needStorePicker && (
+              <div className="space-y-1.5">
+                <Label htmlFor="store">Mağaza</Label>
+                <Select
+                  value={storeId}
+                  onValueChange={setStoreId}
+                  disabled={submitting || storesLoading || stores.length === 0}
+                >
+                  <SelectTrigger id="store">
+                    <SelectValue
+                      placeholder={
+                        storesLoading
+                          ? "Mağazalar yükleniyor..."
+                          : stores.length === 0
+                            ? "Mağaza bulunamadı"
+                            : "Mağaza seçin..."
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {stores.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
             {submitError && (
               <div className="rounded-md border border-destructive/30 bg-destructive/10 p-2.5 text-sm text-destructive">
                 {submitError}
@@ -169,7 +197,7 @@ export default function LoginPage() {
               type="submit"
               className="w-full"
               size="lg"
-              disabled={submitting || !storeId || !username || !password}
+              disabled={submitting || !username || !password}
             >
               {submitting ? "Giriş yapılıyor..." : "Giriş Yap"}
             </Button>

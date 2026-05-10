@@ -18,7 +18,9 @@ export interface StoreSummaryDto {
 }
 
 export interface LoginRequest {
-  storeId: string;
+  // Optional — server resolves the store from the username when there's only
+  // one match. Set this only on the disambiguation retry after a 409.
+  storeId?: string;
   username: string;
   password: string;
 }

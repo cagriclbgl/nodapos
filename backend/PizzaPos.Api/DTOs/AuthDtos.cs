@@ -5,7 +5,10 @@ public record StoreSummaryDto(
     string Name);
 
 public record LoginRequest(
-    Guid StoreId,
+    // Opsiyonel: çoğu durumda kullanıcı adı global unique → server otomatik
+    // çözer. Aynı username birden fazla mağazada varsa /login bir 409 döner,
+    // istemci o zaman bu alanı doldurarak yeniden dener (disambiguation).
+    Guid? StoreId,
     string Username,
     string Password);
 
