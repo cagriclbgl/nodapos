@@ -66,6 +66,18 @@ namespace PizzaPos.Api.Migrations.Postgres
                     ON customer_addresses (""StoreId"", ""CustomerId"");
                 CREATE INDEX IF NOT EXISTS ""IX_customer_addresses_CustomerId""
                     ON customer_addresses (""CustomerId"");
+
+                -- Order-side links to a customer + delivery address. The original
+                -- AddCustomers migration emitted these columns; the recreated .cs
+                -- after the Sprint 6 EF tool mishap forgot them. Idempotent so
+                -- both legacy databases (Supabase) and fresh ones (Hetzner) end
+                -- up with the same schema.
+                ALTER TABLE orders
+                    ADD COLUMN IF NOT EXISTS ""CustomerId""        uuid NULL,
+                    ADD COLUMN IF NOT EXISTS ""CustomerAddressId"" uuid NULL;
+
+                CREATE INDEX IF NOT EXISTS ""IX_orders_StoreId_CustomerId""
+                    ON orders (""StoreId"", ""CustomerId"");
             ");
 
             migrationBuilder.CreateTable(

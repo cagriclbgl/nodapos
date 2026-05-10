@@ -128,7 +128,7 @@ public class AppDbContext : DbContext
             b.Property(x => x.Name).IsRequired().HasMaxLength(150);
             b.Property(x => x.Description).HasMaxLength(500);
 
-            b.HasOne<Store>()
+            b.HasOne(x => x.Store)
                 .WithMany(s => s.Categories)
                 .HasForeignKey(x => x.StoreId)
                 .OnDelete(DeleteBehavior.Restrict);
@@ -153,7 +153,7 @@ public class AppDbContext : DbContext
                 .HasForeignKey(x => x.CategoryId)
                 .OnDelete(DeleteBehavior.Restrict);
 
-            b.HasOne<Store>()
+            b.HasOne(x => x.Store)
                 .WithMany(s => s.Products)
                 .HasForeignKey(x => x.StoreId)
                 .OnDelete(DeleteBehavior.Restrict);
@@ -203,7 +203,7 @@ public class AppDbContext : DbContext
                 .HasForeignKey(x => x.TableId)
                 .OnDelete(DeleteBehavior.SetNull);
 
-            b.HasOne<Store>()
+            b.HasOne(x => x.Store)
                 .WithMany(s => s.Orders)
                 .HasForeignKey(x => x.StoreId)
                 .OnDelete(DeleteBehavior.Restrict);
@@ -303,7 +303,7 @@ public class AppDbContext : DbContext
             b.Property(x => x.FullName).IsRequired().HasMaxLength(200);
             b.Property(x => x.Role).HasConversion<int>();
 
-            b.HasOne<Store>()
+            b.HasOne(x => x.Store)
                 .WithMany()
                 .HasForeignKey(x => x.StoreId)
                 .OnDelete(DeleteBehavior.Restrict);
@@ -323,7 +323,7 @@ public class AppDbContext : DbContext
             b.Property(x => x.Phone).IsRequired().HasMaxLength(50);
             b.Property(x => x.Notes).HasMaxLength(1000);
 
-            b.HasOne<Store>()
+            b.HasOne(x => x.Store)
                 .WithMany()
                 .HasForeignKey(x => x.StoreId)
                 .OnDelete(DeleteBehavior.Restrict);
@@ -350,7 +350,7 @@ public class AppDbContext : DbContext
                 .HasForeignKey(x => x.CustomerId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            b.HasOne<Store>()
+            b.HasOne(x => x.Store)
                 .WithMany()
                 .HasForeignKey(x => x.StoreId)
                 .OnDelete(DeleteBehavior.Restrict);
