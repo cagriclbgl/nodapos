@@ -155,7 +155,14 @@ public class SyncController : ControllerBase
             return Unauthorized();
 
         var serverNow = DateTime.UtcNow;
-        var sinceUtc = since;
+        // ASP.NET model binder URL'deki "Z" suffix'ini goz ardi edip Kind=Unspecified
+        // donduruyor; Npgsql timestamptz column'lari icin Kind=Utc zorunlu, aksi
+        // halde "Cannot write DateTime with Kind=Unspecified to PostgreSQL type
+        // 'timestamp with time zone'" exception'i atar. Kasa pull'u zaten UTC
+        // gonderdigi (ToString("o") + Z) icin SpecifyKind guvenli.
+        var sinceUtc = since.HasValue && since.Value.Kind != DateTimeKind.Utc
+            ? DateTime.SpecifyKind(since.Value, DateTimeKind.Utc)
+            : since;
         var wanted = (aggregates ?? "Product,Category,Store,User,Customer,CustomerAddress,Combo")
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(s => s.ToLowerInvariant())
