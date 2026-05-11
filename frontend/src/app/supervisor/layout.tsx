@@ -45,7 +45,10 @@ function Shell({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (loading) return;
     if (!supervisor) {
-      router.replace("/supervisor/login");
+      // Unified login: /login form'u supervisor credential'ini de algilayip
+      // /supervisor'a yonlendirebiliyor. Ayri /supervisor/login sayfasi
+      // URL ile erisilebilir ama default flow tek formdan gecer.
+      router.replace("/login");
     }
   }, [loading, supervisor, router]);
 
@@ -75,7 +78,7 @@ function Shell({ children }: { children: ReactNode }) {
 
   const onLogout = async () => {
     await logout();
-    router.replace("/supervisor/login");
+    router.replace("/login");
   };
 
   return (
