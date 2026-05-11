@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { Phone, PhoneMissed, PhoneIncoming } from "lucide-react";
+import { Phone, PhoneMissed, PhoneIncoming, Plus } from "lucide-react";
 import { incomingCalls } from "@/lib/api";
 import { describeError } from "@/lib/use-store-api";
 import { useStoreContext } from "@/lib/store-context";
@@ -86,25 +86,33 @@ export default function PosCallsPage() {
 
   return (
     <div className="mx-auto max-w-4xl p-6">
-      <div className="mb-4 flex items-end justify-between gap-3">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-2xl font-bold">Bugünkü Çağrılar</h2>
+          <h2 className="text-2xl font-bold">Paket Servis</h2>
           <p className="text-sm text-muted-foreground">
-            Caller ID kutusundan gelen tüm aramalar.
+            Caller ID kutusundan gelen aramalar ve manuel oluşturulan paket
+            siparişler.
           </p>
         </div>
-        <div className="flex gap-1">
-          {(["All", "New", "Handled", "Missed", "Ignored"] as const).map((s) => (
-            <Button
-              key={s}
-              size="sm"
-              variant={filter === s ? "default" : "outline"}
-              onClick={() => setFilter(s)}
-            >
-              {s === "All" ? "Hepsi" : STATUS_LABEL[s]}
-            </Button>
-          ))}
-        </div>
+        <Button asChild size="lg" className="shrink-0">
+          <Link href="/pos/delivery/new">
+            <Plus className="mr-1.5 h-5 w-5" />
+            Yeni Paket Sipariş
+          </Link>
+        </Button>
+      </div>
+
+      <div className="mb-3 flex flex-wrap items-center gap-1">
+        {(["All", "New", "Handled", "Missed", "Ignored"] as const).map((s) => (
+          <Button
+            key={s}
+            size="sm"
+            variant={filter === s ? "default" : "outline"}
+            onClick={() => setFilter(s)}
+          >
+            {s === "All" ? "Hepsi" : STATUS_LABEL[s]}
+          </Button>
+        ))}
       </div>
 
       {error && (
