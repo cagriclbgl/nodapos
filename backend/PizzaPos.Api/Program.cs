@@ -259,6 +259,11 @@ var app = builder.Build();
     var schemaDb = schemaScope.ServiceProvider.GetRequiredService<AppDbContext>();
     if (string.Equals(dbProvider, "Sqlite", StringComparison.OrdinalIgnoreCase))
     {
+        // Combo schema breaking change (slot→product). Eski kasa SQLite'inde
+        // combo_items eski columns (Label, CategoryId) ile kalmis olabilir;
+        // EnsureCreated mevcut tabloya dokunmaz. Bir kez DROP edip yeniden
+        // yaratıyoruz; combo data zaten cloud-only, pull worker tazeleyecek.
+        await schemaDb.Database.ExecuteSqlRawAsync("DROP TABLE IF EXISTS combo_items");
         await schemaDb.Database.EnsureCreatedAsync();
     }
     else

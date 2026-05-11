@@ -215,8 +215,9 @@ export const combos = {
 
 /**
  * Order'a combo (snapshot) eklemek — sipariş ekranındaki "Kampanyalar" tab'ı
- * kullanır. Her slot için seçilen ürün(ler) backend'e iletilir; backend tek
- * bir OrderItem yaratıp Notes alanına seçim özetini yazar.
+ * kullanır. Yeni model: kasiyer tek tıkla combo ID'sini gönderir; backend
+ * combo.Items'i resolve eder, tek snapshot OrderItem yaratır (ProductName
+ * combo.Name, Notes "2x Klasik Pizza, 1x Cola").
  */
 export const orders = {
   list: (params?: {

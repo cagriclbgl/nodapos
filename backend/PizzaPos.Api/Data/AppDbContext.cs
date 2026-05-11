@@ -422,19 +422,19 @@ public class AppDbContext : DbContext
         {
             b.ToTable("combo_items");
             b.HasKey(x => x.Id);
-            b.Property(x => x.Label).IsRequired().HasMaxLength(100);
 
             b.HasOne(x => x.Combo)
                 .WithMany(c => c.Items)
                 .HasForeignKey(x => x.ComboId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            b.HasOne(x => x.Category)
+            b.HasOne(x => x.Product)
                 .WithMany()
-                .HasForeignKey(x => x.CategoryId)
+                .HasForeignKey(x => x.ProductId)
                 .OnDelete(DeleteBehavior.Restrict);
 
             b.HasIndex(x => new { x.StoreId, x.ComboId });
+            b.HasIndex(x => new { x.StoreId, x.ProductId });
         });
     }
 

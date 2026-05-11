@@ -563,8 +563,6 @@ public class OrderService : IOrderService
     {
         if (request.Quantity <= 0)
             throw new DomainException("Combo quantity must be positive.");
-        if (request.Selections is null || request.Selections.Count == 0)
-            throw new DomainException("Slot seçimleri eksik.");
 
         var orderInfo = await _db.Orders
             .Where(o => o.Id == orderId)
@@ -577,67 +575,34 @@ public class OrderService : IOrderService
 
         var combo = await _db.Combos
             .Include(c => c.Items)
+                .ThenInclude(i => i.Product)
             .FirstOrDefaultAsync(c => c.Id == request.ComboId, ct)
             ?? throw DomainException.NotFound("Kombo");
 
         if (!combo.IsActive)
             throw DomainException.Conflict($"Kombo '{combo.Name}' aktif değil.");
 
-        // Her slot için seçim sayısı slot.Quantity ile eşleşmeli; ürünler aynı
-        // store'da ve slot kategorisinden olmalı.
-        var slotById = combo.Items.ToDictionary(i => i.Id);
-        var allProductIds = request.Selections
-            .SelectMany(s => s.ProductIds)
-            .Distinct()
+        if (combo.Items.Count == 0)
+            throw DomainException.Conflict($"Kombo '{combo.Name}' boş — yönetici en az bir ürün eklemeli.");
+
+        // Notes formatı: "2x Klasik Pizza, 1x Cola" — fiş ve mutfak ekranında
+        // combo içeriği bu satırla görünür. ProductId snapshot için combo'nun
+        // ilk ürünü bağlanır (FK gerekliliği), ProductName/UnitPrice combo'dan
+        // override eder.
+        var sortedItems = combo.Items.OrderBy(i => i.DisplayOrder).ToList();
+        var summaryParts = sortedItems
+            .Select(i => $"{i.Quantity}x {i.Product?.Name ?? "(ürün bulunamadı)"}")
             .ToList();
-        var products = await _db.Products
-            .Where(p => allProductIds.Contains(p.Id))
-            .Select(p => new { p.Id, p.Name, p.CategoryId, p.IsAvailable })
-            .ToListAsync(ct);
-        var productById = products.ToDictionary(p => p.Id);
+        var firstProductId = sortedItems[0].ProductId;
 
-        var summaryParts = new List<string>();
-        Guid? firstProductId = null;
-        foreach (var slot in combo.Items.OrderBy(i => i.DisplayOrder))
-        {
-            var sel = request.Selections.FirstOrDefault(s => s.ComboItemId == slot.Id)
-                ?? throw new DomainException($"'{slot.Label}' slotu için seçim eksik.");
-
-            if (sel.ProductIds.Count != slot.Quantity)
-                throw new DomainException(
-                    $"'{slot.Label}' slotu için {slot.Quantity} ürün seçilmeli (gönderilen: {sel.ProductIds.Count}).");
-
-            var pickedNames = new List<string>();
-            foreach (var pid in sel.ProductIds)
-            {
-                if (!productById.TryGetValue(pid, out var prod))
-                    throw DomainException.NotFound($"Product {pid}");
-                if (!prod.IsAvailable)
-                    throw DomainException.Conflict($"Ürün '{prod.Name}' kullanılamıyor.");
-                if (prod.CategoryId != slot.CategoryId)
-                    throw new DomainException(
-                        $"'{prod.Name}' '{slot.Label}' slotunun kategorisinde değil.");
-                pickedNames.Add(prod.Name);
-                firstProductId ??= prod.Id;
-            }
-            summaryParts.Add($"{slot.Label}: {string.Join(", ", pickedNames)}");
-            _ = slotById; // slot kullanımını analyze warning'ten korur
-        }
-
-        if (firstProductId is null)
-            throw new DomainException("Kombo seçimleri boş.");
-
-        // ProductId, snapshot mantığı korunsun diye gerçek bir ürün ID'sine
-        // bağlanır (slot'taki ilk seçim). Görünüm/raporda ProductName ve
-        // UnitPrice override eder, çünkü OrderItem snapshot fields'ları doldurur.
         var item = new OrderItem
         {
             OrderId = orderInfo.Id,
-            ProductId = firstProductId.Value,
+            ProductId = firstProductId,
             ProductName = combo.Name,        // SNAPSHOT (combo adı)
             UnitPrice = combo.Price,         // SNAPSHOT (combo fiyatı)
             Quantity = request.Quantity,
-            Notes = string.Join(" | ", summaryParts),
+            Notes = string.Join(", ", summaryParts),
         };
         item.LineTotal = item.UnitPrice * item.Quantity;
 

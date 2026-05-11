@@ -263,9 +263,8 @@ export interface CreateOrderRequest {
 
 export interface ComboItemDto {
   id: string;
-  label: string;
-  categoryId: string;
-  categoryName: string;
+  productId: string;
+  productName: string;
   quantity: number;
   displayOrder: number;
 }
@@ -281,8 +280,7 @@ export interface ComboDto {
 }
 
 export interface CreateComboItemRequest {
-  label: string;
-  categoryId: string;
+  productId: string;
   quantity: number;
   displayOrder: number;
 }
@@ -304,15 +302,9 @@ export interface UpdateComboRequest {
   items: CreateComboItemRequest[];
 }
 
-export interface ComboSlotSelection {
-  comboItemId: string;
-  productIds: string[];
-}
-
 export interface AddComboToOrderRequest {
   comboId: string;
   quantity: number;
-  selections: ComboSlotSelection[];
 }
 
 export interface CustomerListItemDto {

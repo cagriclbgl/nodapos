@@ -11,9 +11,8 @@ public record ComboDto(
 
 public record ComboItemDto(
     Guid Id,
-    string Label,
-    Guid CategoryId,
-    string CategoryName,
+    Guid ProductId,
+    string ProductName,
     int Quantity,
     int DisplayOrder);
 
@@ -33,22 +32,15 @@ public record UpdateComboRequest(
     IReadOnlyList<CreateComboItemRequest> Items);
 
 public record CreateComboItemRequest(
-    string Label,
-    Guid CategoryId,
+    Guid ProductId,
     int Quantity,
     int DisplayOrder);
 
 /// <summary>
-/// Sipariş ekranından combo eklemek için kullanılır. Her slot için kasiyerin
-/// seçtiği ürünler. Backend slot başına tek bir snapshot OrderItem yaratır;
-/// ProductId, slot seçimlerinin ilkidir (FK için), ProductName/UnitPrice ise
-/// Combo'dan kopyalanır (tarihsel snapshot).
+/// AddCombo: kasiyer kombo'yu sepete eklemek için tek ID gönderir.
+/// Backend tek snapshot OrderItem yaratır (ProductName=combo.Name,
+/// UnitPrice=combo.Price, Notes="2x Klasik Pizza, 1x Cola").
 /// </summary>
 public record AddComboToOrderRequest(
     Guid ComboId,
-    int Quantity,
-    IReadOnlyList<ComboSlotSelection> Selections);
-
-public record ComboSlotSelection(
-    Guid ComboItemId,
-    IReadOnlyList<Guid> ProductIds);
+    int Quantity);

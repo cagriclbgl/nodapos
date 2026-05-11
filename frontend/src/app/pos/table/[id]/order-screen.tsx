@@ -10,16 +10,14 @@ import {
   Plus,
   Trash2,
 } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, orders as ordersApi } from "@/lib/api";
 import { useStoreContext } from "@/lib/store-context";
 import { describeError } from "@/lib/use-store-api";
 import { formatCurrency } from "@/lib/format";
 import {
-  AddComboToOrderRequest,
   AddOrderItemRequest,
   CategoryDto,
   ComboDto,
-  ComboSlotSelection,
   CompleteOrderRequest,
   CreateOrderRequest,
   OrderDto,
@@ -34,7 +32,6 @@ import { cn } from "@/lib/utils";
 import { OptionsDialog } from "./options-dialog";
 import { PaymentDialog } from "./payment-dialog";
 import { DetailsDialog } from "./details-dialog";
-import { ComboPickerDialog } from "./combo-picker-dialog";
 
 const COMBO_TAB = "__combos__";
 
@@ -62,7 +59,6 @@ export function OrderScreen({ tableId }: Props) {
   const [selectedCat, setSelectedCat] = useState<string>("");
 
   const [pendingProduct, setPendingProduct] = useState<ProductDto | null>(null);
-  const [pendingCombo, setPendingCombo] = useState<ComboDto | null>(null);
   const [showPayment, setShowPayment] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
 
@@ -200,16 +196,20 @@ export function OrderScreen({ tableId }: Props) {
   };
 
   /**
-   * Combo'yu mevcut siparişe ekler. Henüz aktif sipariş yoksa, slot'lardan
-   * seçilen ilk ürünü seed olarak kullanarak siparişi açar; sonra
-   * /api/orders/{id}/combos ile combo'yu append eder ve seed kalemi siler.
-   * Aktif siparişte ise direkt /api/orders/{id}/combos.
+   * Combo'yu mevcut siparişe ekler. Yeni model: backend tek snapshot OrderItem
+   * yaratıyor (ProductName=combo.Name, UnitPrice=combo.Price, Notes ürün
+   * özeti). Kasiyer tarafında modal/dialog yok — combo'ya tıkla, sepete iner.
+   *
+   * Aktif sipariş yoksa, combo'nun ilk ürününü seed olarak gönderip siparişi
+   * açar, sonra /api/orders/{id}/combos ile combo'yu ekler ve seed kalemi
+   * siler (combo eklendiği için son kalem değil, auto-cancel tetiklenmez).
    */
-  const addCombo = async (
-    combo: ComboDto,
-    selections: ComboSlotSelection[]
-  ) => {
+  const addCombo = async (combo: ComboDto) => {
     if (!storeId || !table) return;
+    if (combo.items.length === 0) {
+      setActionError("Bu kampanyada ürün yok.");
+      return;
+    }
     setBusy(true);
     setActionError(null);
     try {
@@ -217,17 +217,13 @@ export function OrderScreen({ tableId }: Props) {
       let seedItemId: string | null = null;
 
       if (!order) {
-        const firstPick = selections.find((s) => s.productIds.length > 0);
-        if (!firstPick) {
-          throw new Error("En az bir slot seçimi olmalı.");
-        }
         const seedPayload: CreateOrderRequest = {
           tableId: table.id,
           orderType: "DineIn",
           discountAmount: 0,
           items: [
             {
-              productId: firstPick.productIds[0],
+              productId: combo.items[0].productId,
               quantity: 1,
               productOptionIds: [],
             },
@@ -244,19 +240,11 @@ export function OrderScreen({ tableId }: Props) {
         workingOrderId = order.id;
       }
 
-      const comboReq: AddComboToOrderRequest = {
+      const afterCombo = await ordersApi.addCombo(workingOrderId, {
         comboId: combo.id,
         quantity: 1,
-        selections,
-      };
-      const afterCombo = await api.post<OrderDto>(
-        `/api/orders/${workingOrderId}/combos`,
-        comboReq,
-        storeId
-      );
+      });
 
-      // Seed kalemini (combo dışındaki) sil ki sepette sadece combo görünsün.
-      // Combo eklendiği için son kalem değil; remove auto-cancel etmez.
       if (seedItemId) {
         const cleaned = await api.delete<OrderDto>(
           `/api/orders/${workingOrderId}/items/${seedItemId}`,
@@ -268,7 +256,6 @@ export function OrderScreen({ tableId }: Props) {
       }
     } catch (err) {
       setActionError(describeError(err));
-      throw err;
     } finally {
       setBusy(false);
     }
@@ -432,31 +419,40 @@ export function OrderScreen({ tableId }: Props) {
                 </p>
               ) : (
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {combos.map((c) => (
-                    <button
-                      key={c.id}
-                      onClick={() => setPendingCombo(c)}
-                      disabled={busy}
-                      className="flex min-h-[120px] flex-col items-start justify-between rounded-2xl border bg-card p-4 text-left text-card-foreground shadow-sm transition-all hover:border-primary/60 hover:shadow-md active:scale-[0.99] disabled:opacity-60"
-                    >
-                      <div>
-                        <p className="text-base font-semibold leading-tight">
-                          ✨ {c.name}
-                        </p>
-                        {c.description && (
-                          <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
-                            {c.description}
+                  {combos.map((c) => {
+                    const summary = c.items
+                      .slice()
+                      .sort((a, b) => a.displayOrder - b.displayOrder)
+                      .map((i) => `${i.quantity}x ${i.productName}`)
+                      .join(", ");
+                    return (
+                      <button
+                        key={c.id}
+                        onClick={() => void addCombo(c)}
+                        disabled={busy}
+                        className="flex min-h-[120px] flex-col items-start justify-between rounded-2xl border bg-card p-4 text-left text-card-foreground shadow-sm transition-all hover:border-primary/60 hover:shadow-md active:scale-[0.99] disabled:opacity-60"
+                      >
+                        <div className="w-full">
+                          <p className="text-base font-semibold leading-tight">
+                            {c.name}
                           </p>
-                        )}
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {c.items.length} slot
+                          {c.description && (
+                            <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+                              {c.description}
+                            </p>
+                          )}
+                          {summary && (
+                            <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                              {summary}
+                            </p>
+                          )}
+                        </div>
+                        <p className="mt-2 font-mono text-lg font-semibold tabular-nums text-primary">
+                          {formatCurrency(c.price)}
                         </p>
-                      </div>
-                      <p className="mt-2 font-mono text-lg font-semibold tabular-nums text-primary">
-                        {formatCurrency(c.price)}
-                      </p>
-                    </button>
-                  ))}
+                      </button>
+                    );
+                  })}
                 </div>
               )
             ) : visibleProducts.length === 0 ? (
@@ -615,18 +611,6 @@ export function OrderScreen({ tableId }: Props) {
           onConfirm={async (line) => {
             await addLine(line);
             setPendingProduct(null);
-          }}
-        />
-      )}
-
-      {pendingCombo && (
-        <ComboPickerDialog
-          combo={pendingCombo}
-          products={products}
-          onClose={() => setPendingCombo(null)}
-          onConfirm={async (selections) => {
-            await addCombo(pendingCombo, selections);
-            setPendingCombo(null);
           }}
         />
       )}

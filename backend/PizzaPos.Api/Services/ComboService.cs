@@ -15,7 +15,7 @@ public class ComboService : IComboService
     {
         var query = _db.Combos
             .Include(c => c.Items)
-                .ThenInclude(i => i.Category)
+                .ThenInclude(i => i.Product)
             .AsQueryable();
 
         if (activeOnly == true)
@@ -32,7 +32,7 @@ public class ComboService : IComboService
     {
         var combo = await _db.Combos
             .Include(c => c.Items)
-                .ThenInclude(i => i.Category)
+                .ThenInclude(i => i.Product)
             .FirstOrDefaultAsync(c => c.Id == id, ct);
         return combo is null ? null : Map(combo);
     }
@@ -41,9 +41,9 @@ public class ComboService : IComboService
     {
         ValidateBasics(request.Name, request.Price);
         if (request.Items is null || request.Items.Count == 0)
-            throw new DomainException("Kombo en az bir slot içermeli.");
+            throw new DomainException("Kombo en az bir ürün içermeli.");
 
-        await EnsureCategoriesExist(request.Items, ct);
+        await EnsureProductsExist(request.Items, ct);
 
         var combo = new Combo
         {
@@ -60,8 +60,7 @@ public class ComboService : IComboService
             _db.ComboItems.Add(new ComboItem
             {
                 Combo = combo,
-                Label = item.Label.Trim(),
-                CategoryId = item.CategoryId,
+                ProductId = item.ProductId,
                 Quantity = Math.Max(1, item.Quantity),
                 DisplayOrder = item.DisplayOrder,
             });
@@ -79,22 +78,20 @@ public class ComboService : IComboService
 
         ValidateBasics(request.Name, request.Price);
         if (request.Items is null || request.Items.Count == 0)
-            throw new DomainException("Kombo en az bir slot içermeli.");
+            throw new DomainException("Kombo en az bir ürün içermeli.");
 
-        await EnsureCategoriesExist(request.Items, ct);
+        await EnsureProductsExist(request.Items, ct);
 
         combo.Name = request.Name.Trim();
         combo.Description = NullIfBlank(request.Description);
         combo.Price = request.Price;
         combo.IsActive = request.IsActive;
         combo.DisplayOrder = request.DisplayOrder;
-        // Slot-only update edge case: tüm scalar field aynı kalırsa EF tracker
-        // entity'yi Unchanged görür, UpdatedAt set olmaz, kasa pull worker
-        // since filter'ı combo'yu atlatır. Slot değişikliği parent'ın content
-        // değişikliği sayılır — explicit damga at.
+        // Ürün listesi değişikliği parent'ın content değişikliği sayılır — kasa
+        // pull worker since filter'ı combo'yu atlamasın diye explicit damga.
         combo.UpdatedAt = DateTime.UtcNow;
 
-        // Slot listesi tamamen yeniden yazılır — önce mevcut item'ları sil.
+        // Ürün listesi tamamen yeniden yazılır — önce mevcut item'ları sil.
         _db.ComboItems.RemoveRange(combo.Items);
         await _db.SaveChangesAsync(ct);
 
@@ -103,8 +100,7 @@ public class ComboService : IComboService
             _db.ComboItems.Add(new ComboItem
             {
                 ComboId = combo.Id,
-                Label = item.Label.Trim(),
-                CategoryId = item.CategoryId,
+                ProductId = item.ProductId,
                 Quantity = Math.Max(1, item.Quantity),
                 DisplayOrder = item.DisplayOrder,
             });
@@ -129,17 +125,17 @@ public class ComboService : IComboService
             throw new DomainException("Kombo fiyatı negatif olamaz.");
     }
 
-    private async Task EnsureCategoriesExist(
+    private async Task EnsureProductsExist(
         IReadOnlyList<CreateComboItemRequest> items, CancellationToken ct)
     {
-        var ids = items.Select(i => i.CategoryId).Distinct().ToList();
-        var existing = await _db.Categories
-            .Where(c => ids.Contains(c.Id))
-            .Select(c => c.Id)
+        var ids = items.Select(i => i.ProductId).Distinct().ToList();
+        var existing = await _db.Products
+            .Where(p => ids.Contains(p.Id))
+            .Select(p => p.Id)
             .ToListAsync(ct);
         var missing = ids.Except(existing).ToList();
         if (missing.Count > 0)
-            throw DomainException.NotFound($"Category {missing[0]}");
+            throw DomainException.NotFound($"Product {missing[0]}");
     }
 
     private static string? NullIfBlank(string? s) =>
@@ -149,8 +145,8 @@ public class ComboService : IComboService
         new(c.Id, c.Name, c.Description, c.Price, c.IsActive, c.DisplayOrder,
             c.Items.OrderBy(i => i.DisplayOrder)
                 .Select(i => new ComboItemDto(
-                    i.Id, i.Label, i.CategoryId,
-                    i.Category?.Name ?? string.Empty,
+                    i.Id, i.ProductId,
+                    i.Product?.Name ?? string.Empty,
                     i.Quantity, i.DisplayOrder))
                 .ToList());
 }

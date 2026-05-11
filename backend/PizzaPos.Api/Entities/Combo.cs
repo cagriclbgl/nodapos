@@ -1,10 +1,10 @@
 namespace PizzaPos.Api.Entities;
 
 /// <summary>
-/// Kampanya menüsü — sabit fiyatlı, içinde slot'lar olan paket. Örnek:
-/// "Aile Menüsü, 599 TL — 2 orta boy pizza + 1 büyük cola".
-/// Her slot ComboItem ile temsil edilir; slot seçimi kasada yapılır,
-/// snapshot OrderItem'a düşer (mevcut OrderItem şeması değişmez).
+/// Kampanya menüsü — sabit fiyatlı, sabit ürün listesi olan paket. Örnek:
+/// "Aile Menüsü, 599 TL — 2x Klasik Pizza + 1x Cola".
+/// Yönetici doğrudan menüden ürünleri seçer; kasiyer combo'ya tıklayınca
+/// dialog açılmaz, tek snapshot OrderItem olarak sepete eklenir.
 /// </summary>
 public class Combo : TenantEntity
 {
@@ -22,14 +22,11 @@ public class ComboItem : TenantEntity
     public Guid ComboId { get; set; }
     public Combo? Combo { get; set; }
 
-    /// <summary>Slot etiketi: "1. Pizza", "İçecek" gibi.</summary>
-    public string Label { get; set; } = string.Empty;
+    /// <summary>Combo'nun içerdiği ürün — Product.Name kullanılır.</summary>
+    public Guid ProductId { get; set; }
+    public Product? Product { get; set; }
 
-    /// <summary>Bu slot için seçim havuzu — kasiyer bu kategori'den ürün seçer.</summary>
-    public Guid CategoryId { get; set; }
-    public Category? Category { get; set; }
-
-    /// <summary>Slot'tan kaç ürün seçilecek.</summary>
+    /// <summary>Bu üründen kaç adet (örn. "2x Klasik Pizza").</summary>
     public int Quantity { get; set; } = 1;
 
     public int DisplayOrder { get; set; }
