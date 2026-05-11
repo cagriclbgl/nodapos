@@ -184,7 +184,10 @@ public class SyncController : ControllerBase
         }
         if (wanted.Contains("product"))
         {
-            var q = _db.Products.IgnoreQueryFilters().AsNoTracking().Include(p => p.Options);
+            // .AsQueryable() Include'un dondurdugu IIncludableQueryable'i
+            // sade IQueryable'a normalize eder — sonraki Where assignment'i
+            // implicit conversion hatasi vermesin diye.
+            var q = _db.Products.IgnoreQueryFilters().AsNoTracking().Include(p => p.Options).AsQueryable();
             if (sinceUtc.HasValue) q = q.Where(x => (x.UpdatedAt ?? x.CreatedAt) > sinceUtc.Value);
             result["products"] = await q.ToListAsync(ct);
         }
@@ -192,7 +195,7 @@ public class SyncController : ControllerBase
         {
             // Combo is cloud-owned (Manager-only writes). Items collection is
             // included so the kasa gets the full slot definition in one call.
-            var q = _db.Combos.IgnoreQueryFilters().AsNoTracking().Include(c => c.Items);
+            var q = _db.Combos.IgnoreQueryFilters().AsNoTracking().Include(c => c.Items).AsQueryable();
             if (sinceUtc.HasValue) q = q.Where(x => (x.UpdatedAt ?? x.CreatedAt) > sinceUtc.Value);
             result["combos"] = await q.ToListAsync(ct);
         }
