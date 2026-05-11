@@ -177,6 +177,12 @@ builder.Services.AddControllers().AddJsonOptions(opt =>
 {
     opt.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
     opt.JsonSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
+    // EF navigation back-reference'lari (ornegin ComboItem.Combo, ki Include
+    // sonrasi EF tracker tarafindan doluyor) JSON serialize sirasinda
+    // sonsuz dongu yaratip 500 atiyordu. IgnoreCycles cycle'i goren yerde
+    // null yazar — kasa pull veya admin GET endpoint'leri bundan etkilenmez.
+    opt.JsonSerializerOptions.ReferenceHandler =
+        System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles;
 });
 
 builder.Services.AddEndpointsApiExplorer();
