@@ -87,4 +87,13 @@ public class OrdersController : TenantControllerBase
     [HttpPost("{id:guid}/cancel")]
     public async Task<ActionResult<OrderDto>> Cancel(Guid id, CancellationToken ct)
         => Ok(await _service.CancelAsync(id, ct));
+
+    /// <summary>
+    /// Delivery transition: Pending → InKitchen → Ready → OutForDelivery → Delivered.
+    /// CourierUserId yalnızca OutForDelivery'ye geçerken anlamlı.
+    /// </summary>
+    [HttpPatch("{id:guid}/fulfillment")]
+    public async Task<ActionResult<OrderDto>> UpdateFulfillment(
+        Guid id, [FromBody] UpdateFulfillmentStatusRequest request, CancellationToken ct)
+        => Ok(await _service.UpdateFulfillmentAsync(id, request, ct));
 }

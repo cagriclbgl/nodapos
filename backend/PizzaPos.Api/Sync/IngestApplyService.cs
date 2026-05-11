@@ -58,6 +58,9 @@ public class IngestApplyService : IIngestApplyService
                 case "OrderDetailsUpdated":       await ApplyOrderDetailsUpdatedAsync(data, ct); break;
                 case "OrderCompleted":            await ApplyOrderCompletedAsync(data, ct); break;
                 case "OrderCancelled":            await ApplyOrderCancelledAsync(data, ct); break;
+                case "OrderFulfillmentUpdated":   await ApplyOrderFulfillmentUpdatedAsync(data, ct); break;
+
+                case "TableStatusChanged":        await ApplyTableStatusChangedAsync(data, ct); break;
 
                 case "CustomerCreated":           await ApplyCustomerUpsertAsync(data, ct, isCreate: true); break;
                 case "CustomerUpdated":           await ApplyCustomerUpsertAsync(data, ct, isCreate: false); break;
@@ -126,6 +129,9 @@ public class IngestApplyService : IIngestApplyService
             FulfillmentStatus = data.TryGetProperty("fulfillmentStatus", out var fs)
                 && fs.ValueKind == JsonValueKind.Number
                 ? (FulfillmentStatus)fs.GetInt32() : FulfillmentStatus.Pending,
+            AssignedCourierUserId = TryGetGuid(data, "assignedCourierUserId"),
+            OutForDeliveryAt = TryGetDateTime(data, "outForDeliveryAt"),
+            DeliveredAt = TryGetDateTime(data, "deliveredAt"),
             IncomingCallId = TryGetGuid(data, "incomingCallId"),
         };
 
@@ -261,6 +267,7 @@ public class IngestApplyService : IIngestApplyService
     private async Task ApplyOrderDetailsUpdatedAsync(JsonElement data, CancellationToken ct)
     {
         var orderId = data.GetProperty("orderId").GetGuid();
+        var customerId = TryGetGuid(data, "customerId");
         var name = TryGetString(data, "customerName");
         var phone = TryGetString(data, "customerPhone");
         var notes = TryGetString(data, "notes");
@@ -268,10 +275,52 @@ public class IngestApplyService : IIngestApplyService
         await _db.Orders.IgnoreQueryFilters()
             .Where(o => o.Id == orderId)
             .ExecuteUpdateAsync(s => s
+                .SetProperty(o => o.CustomerId, customerId)
                 .SetProperty(o => o.CustomerName, name)
                 .SetProperty(o => o.CustomerPhone, phone)
                 .SetProperty(o => o.Notes, notes)
                 .SetProperty(o => o.UpdatedAt, (DateTime?)DateTime.UtcNow), ct);
+    }
+
+    private async Task ApplyOrderFulfillmentUpdatedAsync(JsonElement data, CancellationToken ct)
+    {
+        var orderId = data.GetProperty("orderId").GetGuid();
+        var status = data.TryGetProperty("fulfillmentStatus", out var fs)
+            && fs.ValueKind == JsonValueKind.Number
+            ? (FulfillmentStatus)fs.GetInt32()
+            : FulfillmentStatus.Pending;
+        var courierUserId = TryGetGuid(data, "courierUserId");
+        var outForDeliveryAt = TryGetDateTime(data, "outForDeliveryAt");
+        var deliveredAt = TryGetDateTime(data, "deliveredAt");
+        var updatedAt = TryGetDateTime(data, "updatedAt") ?? DateTime.UtcNow;
+
+        var rows = await _db.Orders.IgnoreQueryFilters()
+            .Where(o => o.Id == orderId)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(o => o.FulfillmentStatus, status)
+                .SetProperty(o => o.AssignedCourierUserId, courierUserId)
+                .SetProperty(o => o.OutForDeliveryAt, outForDeliveryAt)
+                .SetProperty(o => o.DeliveredAt, deliveredAt)
+                .SetProperty(o => o.UpdatedAt, (DateTime?)updatedAt), ct);
+
+        if (rows == 0)
+            _logger.LogWarning(
+                "OrderFulfillmentUpdated: order {Id} not found cloud-side.", orderId);
+    }
+
+    private async Task ApplyTableStatusChangedAsync(JsonElement data, CancellationToken ct)
+    {
+        var tableId = data.GetProperty("tableId").GetGuid();
+        var status = data.TryGetProperty("status", out var st) && st.ValueKind == JsonValueKind.Number
+            ? (TableStatus)st.GetInt32()
+            : TableStatus.Empty;
+        var updatedAt = TryGetDateTime(data, "updatedAt") ?? DateTime.UtcNow;
+
+        await _db.Tables.IgnoreQueryFilters()
+            .Where(t => t.Id == tableId)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(t => t.Status, status)
+                .SetProperty(t => t.UpdatedAt, (DateTime?)updatedAt), ct);
     }
 
     private async Task ApplyOrderCompletedAsync(JsonElement data, CancellationToken ct)

@@ -413,11 +413,28 @@ public class OrderService : IOrderService
         var customerName = string.IsNullOrWhiteSpace(request.CustomerName) ? null : request.CustomerName.Trim();
         var customerPhone = string.IsNullOrWhiteSpace(request.CustomerPhone) ? null : request.CustomerPhone.Trim();
         var notes = string.IsNullOrWhiteSpace(request.Notes) ? null : request.Notes.Trim();
+        var customerId = request.CustomerId;
+
+        // Eger CustomerId verildiyse Customer kaydini cek + Name/Phone'i snapshot
+        // olarak override et (CreateAsync ile ayni pattern). Boylece kasiyer
+        // siparis acildiktan sonra muhsteri linkleyebilir, gecmise dokunmadan.
+        if (customerId is Guid cid)
+        {
+            var cust = await _db.Customers
+                .Where(c => c.Id == cid)
+                .Select(c => new { c.Name, c.Phone })
+                .FirstOrDefaultAsync(ct)
+                ?? throw DomainException.NotFound("Customer");
+            customerName = cust.Name;
+            customerPhone = cust.Phone;
+        }
+
         var now = DateTime.UtcNow;
 
         var rows = await _db.Orders
             .Where(o => o.Id == orderInfo.Id)
             .ExecuteUpdateAsync(s => s
+                .SetProperty(o => o.CustomerId, customerId)
                 .SetProperty(o => o.CustomerName, customerName)
                 .SetProperty(o => o.CustomerPhone, customerPhone)
                 .SetProperty(o => o.Notes, notes)
@@ -429,6 +446,7 @@ public class OrderService : IOrderService
             new
             {
                 orderId = orderInfo.Id,
+                customerId,
                 customerName,
                 customerPhone,
                 notes
@@ -775,6 +793,9 @@ public class OrderService : IOrderService
                 deliveryAddressSnapshot = order.DeliveryAddressSnapshot,
                 deliveryDistrict = order.DeliveryDistrict,
                 fulfillmentStatus = order.FulfillmentStatus,
+                assignedCourierUserId = order.AssignedCourierUserId,
+                outForDeliveryAt = order.OutForDeliveryAt,
+                deliveredAt = order.DeliveredAt,
                 incomingCallId = order.IncomingCallId,
                 items = order.Items.Select(i => new
                 {
@@ -844,6 +865,71 @@ public class OrderService : IOrderService
         await _db.SaveChangesAsync(ct);
 
         await tx.CommitAsync(ct);
+
+        return (await GetAsync(orderInfo.Id, ct))!;
+    }
+
+    public async Task<OrderDto> UpdateFulfillmentAsync(
+        Guid orderId, UpdateFulfillmentStatusRequest request, CancellationToken ct = default)
+    {
+        var orderInfo = await _db.Orders
+            .Where(o => o.Id == orderId)
+            .Select(o => new
+            {
+                o.Id,
+                o.Status,
+                o.OrderType,
+                o.OutForDeliveryAt,
+                o.DeliveredAt
+            })
+            .FirstOrDefaultAsync(ct)
+            ?? throw DomainException.NotFound("Order");
+
+        if (orderInfo.Status != OrderStatus.Active)
+            throw DomainException.Conflict("Cannot change fulfillment on a non-active order.");
+        if (orderInfo.OrderType == OrderType.DineIn)
+            throw DomainException.Conflict(
+                "Fulfillment transitions apply to Takeaway/Delivery orders only.");
+
+        var newStatus = request.Status;
+        var courierUserId = request.CourierUserId;
+
+        if (newStatus == FulfillmentStatus.OutForDelivery
+            && orderInfo.OrderType == OrderType.Delivery
+            && courierUserId is null)
+            throw new DomainException(
+                "CourierUserId is required when moving a Delivery order to OutForDelivery.");
+
+        var now = DateTime.UtcNow;
+        // Stamp transition timestamps when entering each terminal-ish state;
+        // otherwise preserve the existing timestamp (kasiyer rollback edebilir).
+        var newOutForDeliveryAt = newStatus == FulfillmentStatus.OutForDelivery
+            ? (DateTime?)now : orderInfo.OutForDeliveryAt;
+        var newDeliveredAt = newStatus == FulfillmentStatus.Delivered
+            ? (DateTime?)now : orderInfo.DeliveredAt;
+
+        var rows = await _db.Orders
+            .Where(o => o.Id == orderInfo.Id)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(o => o.FulfillmentStatus, newStatus)
+                .SetProperty(o => o.AssignedCourierUserId, courierUserId)
+                .SetProperty(o => o.OutForDeliveryAt, newOutForDeliveryAt)
+                .SetProperty(o => o.DeliveredAt, newDeliveredAt)
+                .SetProperty(o => o.UpdatedAt, (DateTime?)now), ct);
+        if (rows == 0)
+            throw DomainException.Conflict("Order disappeared while updating fulfillment.");
+
+        await _outbox.EmitAsync("Order", orderInfo.Id, "OrderFulfillmentUpdated",
+            new
+            {
+                orderId = orderInfo.Id,
+                fulfillmentStatus = newStatus,
+                courierUserId,
+                outForDeliveryAt = newOutForDeliveryAt,
+                deliveredAt = newDeliveredAt,
+                updatedAt = now
+            }, ct);
+        await _db.SaveChangesAsync(ct);
 
         return (await GetAsync(orderInfo.Id, ct))!;
     }

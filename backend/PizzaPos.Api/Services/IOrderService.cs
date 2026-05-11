@@ -43,4 +43,11 @@ public interface IOrderService
     /// IncomingCallId verilirse o çağrı otomatik Handled olarak işaretlenir.
     /// </summary>
     Task<OrderDto> CreateDeliveryAsync(CreateDeliveryOrderRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// Delivery transition akışı: Pending → InKitchen → Ready → OutForDelivery → Delivered.
+    /// CourierUserId yalnızca OutForDelivery'ye geçerken set edilir.
+    /// </summary>
+    Task<OrderDto> UpdateFulfillmentAsync(
+        Guid orderId, UpdateFulfillmentStatusRequest request, CancellationToken ct = default);
 }

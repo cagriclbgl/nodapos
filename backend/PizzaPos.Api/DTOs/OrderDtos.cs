@@ -90,4 +90,5 @@ public record UpdateOrderItemRequest(int Quantity);
 public record UpdateOrderDetailsRequest(
     string? CustomerName,
     string? CustomerPhone,
-    string? Notes);
+    string? Notes,
+    Guid? CustomerId = null);

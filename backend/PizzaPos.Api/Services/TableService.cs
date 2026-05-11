@@ -8,8 +8,13 @@ namespace PizzaPos.Api.Services;
 public class TableService : ITableService
 {
     private readonly AppDbContext _db;
+    private readonly IOutboxEmitter _outbox;
 
-    public TableService(AppDbContext db) => _db = db;
+    public TableService(AppDbContext db, IOutboxEmitter outbox)
+    {
+        _db = db;
+        _outbox = outbox;
+    }
 
     public async Task<IReadOnlyList<TableDto>> ListAsync(CancellationToken ct = default)
     {
@@ -62,7 +67,17 @@ public class TableService : ITableService
         var table = await _db.Tables.FindAsync([id], ct)
             ?? throw DomainException.NotFound("Table");
 
+        if (table.Status == status)
+            return Map(table); // no-op — outbox spam'i onle
+
         table.Status = status;
+        await _outbox.EmitAsync("Table", table.Id, "TableStatusChanged",
+            new
+            {
+                tableId = table.Id,
+                status,
+                updatedAt = DateTime.UtcNow
+            }, ct);
         await _db.SaveChangesAsync(ct);
         return Map(table);
     }

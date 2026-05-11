@@ -88,6 +88,11 @@ public class ComboService : IComboService
         combo.Price = request.Price;
         combo.IsActive = request.IsActive;
         combo.DisplayOrder = request.DisplayOrder;
+        // Slot-only update edge case: tüm scalar field aynı kalırsa EF tracker
+        // entity'yi Unchanged görür, UpdatedAt set olmaz, kasa pull worker
+        // since filter'ı combo'yu atlatır. Slot değişikliği parent'ın content
+        // değişikliği sayılır — explicit damga at.
+        combo.UpdatedAt = DateTime.UtcNow;
 
         // Slot listesi tamamen yeniden yazılır — önce mevcut item'ları sil.
         _db.ComboItems.RemoveRange(combo.Items);
