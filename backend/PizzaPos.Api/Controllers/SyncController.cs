@@ -201,21 +201,15 @@ public class SyncController : ControllerBase
         }
         if (wanted.Contains("user"))
         {
-            // Strip PasswordHash before serializing — kasa only needs identity
-            // metadata for audit-trail snapshots, never the credential material.
+            // PasswordHash dahil tam User gonderilir — kasanin offline login
+            // yapabilmesi icin bcrypt hash sart. Hash bcrypt cost 11+ ile
+            // one-way, HTTPS+HMAC altinda transit ediyor; kasanin local SQLite'ina
+            // inmesi cloud DB'sindeki saklama ile esdeger guvenlik seviyesinde.
+            // (Eski Select projection PasswordHash atliyordu → kasada
+            //  AuthService.Verify("", request.Password) her seferinde 401.)
             var q = _db.Users.IgnoreQueryFilters().AsNoTracking();
             if (sinceUtc.HasValue) q = q.Where(x => (x.UpdatedAt ?? x.CreatedAt) > sinceUtc.Value);
-            result["users"] = await q.Select(u => new
-            {
-                u.Id,
-                u.StoreId,
-                u.Username,
-                u.FullName,
-                u.Role,
-                u.IsActive,
-                u.CreatedAt,
-                u.UpdatedAt
-            }).ToListAsync(ct);
+            result["users"] = await q.ToListAsync(ct);
         }
         if (wanted.Contains("customer"))
         {
