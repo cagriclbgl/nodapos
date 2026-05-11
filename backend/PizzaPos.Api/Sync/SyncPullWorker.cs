@@ -353,8 +353,16 @@ public class SyncPullWorker : BackgroundService
 
     private static DateTime Stamp(BaseEntity e) => e.UpdatedAt ?? e.CreatedAt;
 
-    private static readonly JsonSerializerOptions _jsonOpts = new()
+    private static readonly JsonSerializerOptions _jsonOpts = CreateOpts();
+
+    private static JsonSerializerOptions CreateOpts()
     {
-        PropertyNameCaseInsensitive = true
-    };
+        var o = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+        // Cloud SyncController/Program.cs MVC config'i JsonStringEnumConverter
+        // ile enum'lari string olarak yazar (Role: "Manager", Status: "Active").
+        // Pull worker tarafindaki deserialize bunu integer beklerse fail —
+        // tum enum'lari ayni string semantigi ile oku.
+        o.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+        return o;
+    }
 }
