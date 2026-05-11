@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { Phone, PhoneMissed, PhoneIncoming } from "lucide-react";
+import { ArrowLeft, Phone, PhoneMissed, PhoneIncoming } from "lucide-react";
 import { incomingCalls } from "@/lib/api";
 import { describeError } from "@/lib/use-store-api";
 import { useStoreContext } from "@/lib/store-context";
@@ -86,6 +86,13 @@ export default function PosCallsPage() {
 
   return (
     <div className="mx-auto max-w-4xl p-6">
+      <Link
+        href="/pos"
+        className="mb-3 inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <ArrowLeft className="h-4 w-4" />
+        Kasaya Dön
+      </Link>
       <div className="mb-4 flex items-end justify-between gap-3">
         <div>
           <h2 className="text-2xl font-bold">Bugünkü Çağrılar</h2>

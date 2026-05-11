@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { ApiError, api } from "@/lib/api";
+import { ApiError, api, supervisorAuth } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import type { StoreSummaryDto } from "@/types/api";
 import { Button } from "@/components/ui-v2/button";
@@ -71,7 +71,25 @@ export default function LoginPage() {
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.status === 401) {
-          setSubmitError("Hatalı kullanıcı adı veya şifre.");
+          // Regular store login failed — kullanici Supervisor olabilir.
+          // Ayni form'dan supervisor credential'i ile giriliyorsa otomatik
+          // /supervisor'a yonlendirelim (ayri /supervisor/login sayfasi
+          // gereksiz). Iki API'ye de hatali credential ise gercek hata mesaji.
+          try {
+            await supervisorAuth.login({ username, password });
+            router.replace("/supervisor");
+            return;
+          } catch (supErr) {
+            if (supErr instanceof ApiError && supErr.status === 401) {
+              setSubmitError("Hatalı kullanıcı adı veya şifre.");
+            } else {
+              setSubmitError(
+                supErr instanceof ApiError
+                  ? supErr.detail || supErr.message
+                  : String(supErr)
+              );
+            }
+          }
         } else if (err.status === 409) {
           // Multiple stores have this username — surface the picker.
           setNeedStorePicker(true);
@@ -230,7 +248,7 @@ export default function LoginPage() {
               {submitting ? "Giriş yapılıyor..." : "Giriş Yap"}
             </Button>
           </form>
-          <div className="mt-6 flex flex-col gap-1.5 border-t pt-4 text-center text-sm">
+          <div className="mt-6 border-t pt-4 text-center text-sm">
             <span className="text-muted-foreground">
               Restoran sahibi misin?{" "}
               <a
@@ -240,12 +258,6 @@ export default function LoginPage() {
                 Başvuru yap
               </a>
             </span>
-            <a
-              href="/supervisor/login"
-              className="text-xs text-muted-foreground transition-colors hover:text-foreground"
-            >
-              Platform yöneticisi girişi
-            </a>
           </div>
         </CardContent>
       </Card>
