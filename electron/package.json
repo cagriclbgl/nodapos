@@ -1,7 +1,7 @@
 {
   "name": "pizzapos-desktop",
-  "version": "0.1.0",
-  "description": "PizzaPos offline-first desktop shell — wraps the .NET backend (SQLite) and the Next.js frontend in a single Electron window.",
+  "version": "0.1.1",
+  "description": "NodaPos offline-first desktop shell — wraps the .NET backend (SQLite) and the Next.js frontend in a single Electron window.",
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc",
@@ -12,9 +12,11 @@
     "publish-api": "powershell -ExecutionPolicy Bypass -File scripts/publish-api.ps1",
     "publish-frontend": "powershell -ExecutionPolicy Bypass -File scripts/publish-frontend.ps1",
     "publish-all": "npm run publish-api && npm run publish-frontend",
-    "make": "npm run build && npm run publish-all && electron-builder"
+    "make": "npm run build && npm run publish-all && electron-builder",
+    "make-and-publish": "npm run build && npm run publish-all && electron-builder --publish always"
   },
   "dependencies": {
+    "electron-updater": "^6.3.0",
     "get-port": "^5.1.1",
     "node-hid": "^3.1.2",
     "usb": "^2.14.0",

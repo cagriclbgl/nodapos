@@ -22,7 +22,7 @@ namespace PizzaPos.Api.Sync;
 public class SyncPullWorker : BackgroundService
 {
     private static readonly string[] DefaultAggregates =
-        { "Store", "Category", "Product", "Combo", "User", "Customer", "CustomerAddress" };
+        { "Store", "Table", "Category", "Product", "Combo", "User", "Customer", "CustomerAddress" };
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IHttpClientFactory _httpFactory;
@@ -148,6 +148,8 @@ public class SyncPullWorker : BackgroundService
 
         if (data.TryGetProperty("stores", out var stores))
             totalApplied += await UpsertSimpleAsync<Store>(db, stores, ct);
+        if (data.TryGetProperty("tables", out var tables))
+            totalApplied += await UpsertSimpleAsync<Table>(db, tables, ct);
         if (data.TryGetProperty("categories", out var cats))
             totalApplied += await UpsertSimpleAsync<Category>(db, cats, ct);
         if (data.TryGetProperty("products", out var prods))

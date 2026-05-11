@@ -5,6 +5,7 @@ import * as fs from "fs";
 import * as crypto from "crypto";
 import getPort from "get-port";
 import waitOn from "wait-on";
+import { autoUpdater } from "electron-updater";
 import { CallerIdListener } from "./hid/caller-id-listener";
 import { IncomingCallBridge } from "./services/incoming-call-bridge";
 import { CLOUD_API_BASE_URL, HMAC_SECRET } from "./config";
@@ -249,6 +250,70 @@ function startCallerIdListener(apiPort: number): void {
   callerIdListener = listener;
 }
 
+/**
+ * Auto-update via electron-updater + GitHub Releases. Kasa her acilista
+ * 10sn delay sonra son release'i sorar; bulursa background'da indirir,
+ * uygulamayi kapatinca yukler (autoInstallOnAppQuit default true). Her
+ * 6 saatte tekrar kontrol — uzun acik kalan kasalar gecikmez.
+ */
+function setupAutoUpdater() {
+  if (!app.isPackaged) {
+    log("Dev mode: autoUpdater disabled.");
+    return;
+  }
+  autoUpdater.logger = {
+    info: (m: unknown) => log(`[updater] ${m}`),
+    warn: (m: unknown) => log(`[updater] WARN ${m}`),
+    error: (m: unknown) => log(`[updater] ERROR ${m}`),
+    debug: () => {},
+  } as never;
+
+  autoUpdater.on("checking-for-update", () => log("[updater] checking..."));
+  autoUpdater.on("update-available", (info) =>
+    log(`[updater] update available: v${info.version}`)
+  );
+  autoUpdater.on("update-not-available", () =>
+    log("[updater] already at latest version.")
+  );
+  autoUpdater.on("download-progress", (p) =>
+    log(`[updater] download ${Math.round(p.percent)}% (${Math.round(p.bytesPerSecond / 1024)} KB/s)`)
+  );
+  autoUpdater.on("update-downloaded", (info) => {
+    log(`[updater] downloaded v${info.version} — will install on quit.`);
+    // Kullaniciyi bilgilendir, "Simdi Yukle" derse hemen yukle.
+    void dialog
+      .showMessageBox({
+        type: "info",
+        buttons: ["Şimdi Yükle", "Sonra"],
+        defaultId: 0,
+        title: "Güncelleme Hazır",
+        message: `NodaPos v${info.version} indirildi.`,
+        detail: "Kasayı kapatıp tekrar açana kadar otomatik yüklenir. Şimdi yüklemek için butona basın.",
+      })
+      .then((result) => {
+        if (result.response === 0) autoUpdater.quitAndInstall();
+      });
+  });
+  autoUpdater.on("error", (err) =>
+    log(`[updater] error: ${err?.message ?? err}`)
+  );
+
+  // Ilk kontrol pencere acildiktan 10sn sonra (kasa ekranina ilk yansiyan
+  // anlik UI yarismasi olmasin). Sonra 6 saatlik periyot.
+  setTimeout(() => {
+    autoUpdater.checkForUpdates().catch((err) =>
+      log(`[updater] initial check failed: ${err?.message ?? err}`)
+    );
+  }, 10_000);
+  setInterval(
+    () =>
+      autoUpdater.checkForUpdates().catch((err) =>
+        log(`[updater] periodic check failed: ${err?.message ?? err}`)
+      ),
+    6 * 60 * 60 * 1000
+  );
+}
+
 app.whenReady().then(async () => {
   ensureLog();
   try {
@@ -262,6 +327,8 @@ app.whenReady().then(async () => {
     await createWindow(frontendPort);
     // Caller ID listener pencere açıldıktan SONRA — IPC broadcast'ı için.
     startCallerIdListener(apiPort);
+    // Auto-update arka planda — basarisiz olsa bile kasayi engellemesin.
+    setupAutoUpdater();
   } catch (err) {
     log(`Startup failed: ${err}`);
     dialog.showErrorBox("PizzaPos başlatılamadı", String(err));

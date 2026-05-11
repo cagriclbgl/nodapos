@@ -2,6 +2,11 @@ appId: com.pizzapos.desktop
 productName: PizzaPos
 directories:
   output: dist-installer
+publish:
+  provider: github
+  owner: cagriclbgl
+  repo: nodapos
+  releaseType: release
 files:
   - dist/**
   - package.json

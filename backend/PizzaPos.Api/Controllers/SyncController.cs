@@ -163,7 +163,7 @@ public class SyncController : ControllerBase
         var sinceUtc = since.HasValue && since.Value.Kind != DateTimeKind.Utc
             ? DateTime.SpecifyKind(since.Value, DateTimeKind.Utc)
             : since;
-        var wanted = (aggregates ?? "Product,Category,Store,User,Customer,CustomerAddress,Combo")
+        var wanted = (aggregates ?? "Product,Category,Store,Table,User,Customer,CustomerAddress,Combo")
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(s => s.ToLowerInvariant())
             .ToHashSet();
@@ -182,6 +182,14 @@ public class SyncController : ControllerBase
             var q = _db.Stores.IgnoreQueryFilters().AsNoTracking();
             if (sinceUtc.HasValue) q = q.Where(x => (x.UpdatedAt ?? x.CreatedAt) > sinceUtc.Value);
             result["stores"] = await q.ToListAsync(ct);
+        }
+        if (wanted.Contains("table"))
+        {
+            // Cloud-owned (Manager-only writes). Kasiyer masa eklemez,
+            // sadece cloud admin'den eklenip kasaya pull edilir.
+            var q = _db.Tables.IgnoreQueryFilters().AsNoTracking();
+            if (sinceUtc.HasValue) q = q.Where(x => (x.UpdatedAt ?? x.CreatedAt) > sinceUtc.Value);
+            result["tables"] = await q.ToListAsync(ct);
         }
         if (wanted.Contains("category"))
         {
