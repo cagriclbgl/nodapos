@@ -341,7 +341,7 @@ export default function CombosPage() {
             </DialogTitle>
           </DialogHeader>
 
-          <div className="grid max-h-[calc(90vh-8rem)] gap-4 overflow-y-auto p-6 md:grid-cols-2">
+          <div className="grid flex-1 gap-4 overflow-y-auto p-6 md:grid-cols-2">
             {/* Sol: kampanya bilgileri + seçilen ürünler */}
             <section className="space-y-4">
               <div className="grid gap-2">
@@ -565,7 +565,7 @@ export default function CombosPage() {
             </p>
           )}
 
-          <DialogFooter className="border-t px-6 py-4">
+          <DialogFooter className="flex-shrink-0 border-t bg-background px-6 py-4">
             <Button variant="outline" onClick={close} disabled={busy}>
               Vazgeç
             </Button>

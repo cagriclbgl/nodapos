@@ -259,11 +259,33 @@ var app = builder.Build();
     var schemaDb = schemaScope.ServiceProvider.GetRequiredService<AppDbContext>();
     if (string.Equals(dbProvider, "Sqlite", StringComparison.OrdinalIgnoreCase))
     {
-        // Combo schema breaking change (slot→product). Eski kasa SQLite'inde
-        // combo_items eski columns (Label, CategoryId) ile kalmis olabilir;
-        // EnsureCreated mevcut tabloya dokunmaz. Bir kez DROP edip yeniden
-        // yaratıyoruz; combo data zaten cloud-only, pull worker tazeleyecek.
-        await schemaDb.Database.ExecuteSqlRawAsync("DROP TABLE IF EXISTS combo_items");
+        // EnsureCreated mevcut DB'ye dokunmaz (sadece tum DB bossa tablolari
+        // yaratir). Yani sema degisiklikleri sonrasi manuel DROP + CREATE gerek.
+        // Combo schema breaking change (slot→product): eski combo_items
+        // tablosunu DROP edip yeni kolonlarla yeniden yaratiyoruz. Combo data
+        // zaten cloud-only, pull worker tazeleyecek.
+        await schemaDb.Database.ExecuteSqlRawAsync("""
+            DROP TABLE IF EXISTS combo_items;
+            CREATE TABLE combo_items (
+                Id TEXT NOT NULL PRIMARY KEY,
+                StoreId TEXT NOT NULL,
+                ComboId TEXT NOT NULL,
+                ProductId TEXT NOT NULL,
+                Quantity INTEGER NOT NULL,
+                DisplayOrder INTEGER NOT NULL,
+                CreatedAt TEXT NOT NULL,
+                UpdatedAt TEXT NULL,
+                FOREIGN KEY (StoreId) REFERENCES stores(Id) ON DELETE RESTRICT,
+                FOREIGN KEY (ComboId) REFERENCES combos(Id) ON DELETE CASCADE,
+                FOREIGN KEY (ProductId) REFERENCES products(Id) ON DELETE RESTRICT
+            );
+            CREATE INDEX IF NOT EXISTS IX_combo_items_StoreId_ComboId
+                ON combo_items (StoreId, ComboId);
+            CREATE INDEX IF NOT EXISTS IX_combo_items_StoreId_ProductId
+                ON combo_items (StoreId, ProductId);
+            """);
+        // Sonra EnsureCreated ile eksik kalan baska tablolar varsa yaratilsin
+        // (gercekte combos tablosu zaten varsa Combo entity ile uyumlu).
         await schemaDb.Database.EnsureCreatedAsync();
     }
     else
