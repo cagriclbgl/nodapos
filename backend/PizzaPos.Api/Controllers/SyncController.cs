@@ -163,21 +163,28 @@ public class SyncController : ControllerBase
 
         var result = new Dictionary<string, object>();
 
+        // AsNoTracking on every aggregate — without it, EF's automatic
+        // navigation fix-up populates Store.Categories / Store.Products /
+        // Category.Products etc. when those tables are queried in the same
+        // DbContext scope. Those collections then ship to the kasa in JSON,
+        // and the pull worker hits "entity already tracked" because cascading
+        // Add() attaches each child a second time during the dedicated
+        // UpsertCategoriesAsync / UpsertProductsAsync pass.
         if (wanted.Contains("store"))
         {
-            var q = _db.Stores.IgnoreQueryFilters().AsQueryable();
+            var q = _db.Stores.IgnoreQueryFilters().AsNoTracking();
             if (sinceUtc.HasValue) q = q.Where(x => (x.UpdatedAt ?? x.CreatedAt) > sinceUtc.Value);
             result["stores"] = await q.ToListAsync(ct);
         }
         if (wanted.Contains("category"))
         {
-            var q = _db.Categories.IgnoreQueryFilters().AsQueryable();
+            var q = _db.Categories.IgnoreQueryFilters().AsNoTracking();
             if (sinceUtc.HasValue) q = q.Where(x => (x.UpdatedAt ?? x.CreatedAt) > sinceUtc.Value);
             result["categories"] = await q.ToListAsync(ct);
         }
         if (wanted.Contains("product"))
         {
-            var q = _db.Products.IgnoreQueryFilters().Include(p => p.Options).AsQueryable();
+            var q = _db.Products.IgnoreQueryFilters().AsNoTracking().Include(p => p.Options);
             if (sinceUtc.HasValue) q = q.Where(x => (x.UpdatedAt ?? x.CreatedAt) > sinceUtc.Value);
             result["products"] = await q.ToListAsync(ct);
         }
@@ -185,7 +192,7 @@ public class SyncController : ControllerBase
         {
             // Combo is cloud-owned (Manager-only writes). Items collection is
             // included so the kasa gets the full slot definition in one call.
-            var q = _db.Combos.IgnoreQueryFilters().Include(c => c.Items).AsQueryable();
+            var q = _db.Combos.IgnoreQueryFilters().AsNoTracking().Include(c => c.Items);
             if (sinceUtc.HasValue) q = q.Where(x => (x.UpdatedAt ?? x.CreatedAt) > sinceUtc.Value);
             result["combos"] = await q.ToListAsync(ct);
         }
@@ -193,7 +200,7 @@ public class SyncController : ControllerBase
         {
             // Strip PasswordHash before serializing — kasa only needs identity
             // metadata for audit-trail snapshots, never the credential material.
-            var q = _db.Users.IgnoreQueryFilters().AsQueryable();
+            var q = _db.Users.IgnoreQueryFilters().AsNoTracking();
             if (sinceUtc.HasValue) q = q.Where(x => (x.UpdatedAt ?? x.CreatedAt) > sinceUtc.Value);
             result["users"] = await q.Select(u => new
             {
@@ -209,13 +216,13 @@ public class SyncController : ControllerBase
         }
         if (wanted.Contains("customer"))
         {
-            var q = _db.Customers.IgnoreQueryFilters().AsQueryable();
+            var q = _db.Customers.IgnoreQueryFilters().AsNoTracking();
             if (sinceUtc.HasValue) q = q.Where(x => (x.UpdatedAt ?? x.CreatedAt) > sinceUtc.Value);
             result["customers"] = await q.ToListAsync(ct);
         }
         if (wanted.Contains("customeraddress"))
         {
-            var q = _db.CustomerAddresses.IgnoreQueryFilters().AsQueryable();
+            var q = _db.CustomerAddresses.IgnoreQueryFilters().AsNoTracking();
             if (sinceUtc.HasValue) q = q.Where(x => (x.UpdatedAt ?? x.CreatedAt) > sinceUtc.Value);
             result["customerAddresses"] = await q.ToListAsync(ct);
         }
