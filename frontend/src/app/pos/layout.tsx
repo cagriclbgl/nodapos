@@ -23,7 +23,7 @@ export default function PosLayout({
                 href="/pos/calls"
                 className="text-xs text-muted-foreground hover:text-foreground"
               >
-                Çağrılar
+                Paket Servis
               </Link>
             </div>
             <div className="flex items-center gap-4">

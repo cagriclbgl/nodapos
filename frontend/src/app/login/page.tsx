@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Pizza } from "lucide-react";
+import Image from "next/image";
 import { ApiError, api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import type { StoreSummaryDto } from "@/types/api";
@@ -116,15 +116,43 @@ export default function LoginPage() {
   };
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md items-center px-6 py-10">
-      <Card className="w-full">
-        <CardHeader className="space-y-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-            <Pizza className="h-6 w-6" />
+    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-orange-50 via-amber-50 to-rose-50 px-6 py-10 dark:from-zinc-950 dark:via-zinc-900 dark:to-zinc-950">
+      {/* Dekoratif blur orb'ları — sıcak NodaPos paleti */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -left-32 -top-32 h-96 w-96 rounded-full bg-orange-400/40 blur-3xl dark:bg-orange-600/20"
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -bottom-40 -right-32 h-[28rem] w-[28rem] rounded-full bg-rose-400/30 blur-3xl dark:bg-rose-600/15"
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute left-1/2 top-1/2 h-72 w-72 -translate-x-1/2 -translate-y-1/2 rounded-full bg-amber-300/25 blur-3xl dark:bg-amber-700/10"
+      />
+      {/* İnce noise / grid dokusu */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_1px_1px,rgba(0,0,0,0.05)_1px,transparent_0)] [background-size:24px_24px] dark:bg-[radial-gradient(circle_at_1px_1px,rgba(255,255,255,0.04)_1px,transparent_0)]"
+      />
+
+      <Card className="relative z-10 w-full max-w-md border-white/40 bg-white/70 shadow-2xl shadow-orange-900/10 backdrop-blur-xl dark:border-white/10 dark:bg-zinc-900/70 dark:shadow-black/40">
+        <CardHeader className="space-y-4 pb-2">
+          <div className="flex items-center justify-center">
+            <div className="rounded-2xl bg-white p-2 shadow-lg shadow-orange-500/20 ring-1 ring-orange-200/60 dark:bg-zinc-950 dark:ring-orange-900/40">
+              <Image
+                src="/icon.png"
+                alt="NodaPos"
+                width={64}
+                height={64}
+                priority
+                className="h-16 w-16 rounded-xl"
+              />
+            </div>
           </div>
-          <div>
-            <CardTitle>NodaPos Giriş</CardTitle>
-            <CardDescription className="mt-1">
+          <div className="text-center">
+            <CardTitle className="text-2xl">NodaPos&apos;a Hoş Geldin</CardTitle>
+            <CardDescription className="mt-1.5">
               Kullanıcı adın ve şifrenle giriş yap.
             </CardDescription>
           </div>
