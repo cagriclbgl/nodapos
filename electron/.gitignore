@@ -2,4 +2,7 @@ node_modules/
 dist/
 dist-installer/
 resources/api/
+resources/frontend/
 *.log
+# Kasa-cloud sync secret (üretim binary'sine gömülü) — repo'da TUTMA
+src/config.ts

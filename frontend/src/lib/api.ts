@@ -52,7 +52,19 @@ export class ApiError extends Error {
 interface ApiOptions extends Omit<RequestInit, "body"> {
   storeId?: string | null;
   body?: unknown;
+  /** Set when the endpoint must hit cloud regardless of host (e.g. public
+   *  restaurant registration submitted from a kasa that's still unprovisioned). */
+  cloudOnly?: boolean;
 }
+
+/**
+ * Cloud-only endpoints (restaurant registration, supervisor flows reachable
+ * from anonymous kasa screens) must reach Hetzner directly even when the
+ * kasa's lib/env runtime resolves API_BASE_URL to localhost. Same value on
+ * Vercel cloud admin where it's a no-op.
+ */
+const CLOUD_API_BASE_URL =
+  process.env.NEXT_PUBLIC_CLOUD_API_BASE_URL ?? "https://api.nodapos.com";
 
 /**
  * Thin fetch wrapper around the .NET backend. Adds X-Store-Id when provided,
@@ -63,7 +75,7 @@ interface ApiOptions extends Omit<RequestInit, "body"> {
  */
 export async function apiFetch<T>(
   path: string,
-  { storeId, body, headers, ...rest }: ApiOptions = {}
+  { storeId, body, headers, cloudOnly, ...rest }: ApiOptions = {}
 ): Promise<T> {
   const finalHeaders: Record<string, string> = {
     Accept: "application/json",
@@ -72,7 +84,8 @@ export async function apiFetch<T>(
   if (body !== undefined) finalHeaders["Content-Type"] = "application/json";
   if (storeId) finalHeaders["X-Store-Id"] = storeId;
 
-  const res = await fetch(`${API_BASE_URL}${path}`, {
+  const baseUrl = cloudOnly ? CLOUD_API_BASE_URL : API_BASE_URL;
+  const res = await fetch(`${baseUrl}${path}`, {
     ...rest,
     credentials: "include",
     headers: finalHeaders,
@@ -245,8 +258,16 @@ export const incomingCalls = {
  * to start the supervisor approval flow.
  */
 export const registrations = {
+  // Always hits cloud. A fresh kasa has no Store/User yet — submitting the
+  // registration locally would write to its (empty) SQLite and never reach
+  // the supervisor. Pull worker brings the approved Manager user down
+  // automatically once the supervisor accepts.
   create: (req: CreateStoreRegistrationRequest) =>
-    api.post<{ id: string }>("/api/registrations", req),
+    apiFetch<{ id: string }>("/api/registrations", {
+      method: "POST",
+      body: req,
+      cloudOnly: true,
+    }),
 };
 
 /**

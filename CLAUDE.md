@@ -42,7 +42,85 @@ Yönetici Paneli: Mobil uyumlu, günlük/haftalık ciro grafikleri ve stok/fiyat
 
 ---
 
-## Mevcut Durum (son güncelleme: 2026-05-09, gün)
+## Mevcut Durum (son güncelleme: 2026-05-11)
+
+### 2026-05-10/11 Yapılanlar — özet (11 commit, 4f52b93..ef89428)
+
+1. **Auth / supervisor onay UX fix** — commit `4f52b93`:
+   - `AuthController.Login` pre-check artık `request.StoreId` verildiğinde çalışıyor (önce StoreId=null ile her giriş 404'tü).
+   - `/supervisor/registrations` onay dialog'una random parola üretici (↻), storeName-tabanlı username önerisi, onay sonrası "Hesap Oluşturuldu" özet ekranı (username + şifre + login URL kopya butonları). 2026-05-10 gecesinin iki açık sorunu bu commit'le çözüldü.
+2. **EF Core shadow FK fix** — commit `bd56955`:
+   - `AppDbContext`'te Category/Product/Order/User/Customer/CustomerAddress için `HasOne<Store>()` (anonim) → `HasOne(x => x.Store)`. Önce EF her birine shadow `StoreId1` FK ekliyordu, Postgres her authed endpoint'te 500 atıyordu. 6 build warning de düştü.
+   - `AddCustomersAndOutbox` migration'a idempotent `ALTER TABLE orders ADD CustomerId/CustomerAddressId + IX_StoreId_CustomerId` eklendi (Sprint 6'da unutulmuştu).
+3. **Production startup fix** — commit `783012c`:
+   - `Program.cs` production'da `PendingModelChangesWarning`'i Ignore ediyor (Sprint 6 snapshot drift'i nedeniyle container crashloop'taydı). Dev'de fail-fast kalır.
+4. **JWT role claim fix** — commit `ef7db47`:
+   - `MapInboundClaims=false` + `JwtTokenService`'ten duplicate `ClaimTypes.Role/Name` claim'leri silindi. Önce `[Authorize(Roles="Manager")]` her seferinde 403'tü (kısa "role" claim'i uzun URL'ye maplenince RoleClaimType eşleşmiyordu).
+5. **POS UX fix** — commit `17168fd`:
+   - `/pos` masa ızgarası boşsa Cashier'a "Masa ekle" butonu gösterilmiyor (Cashier `/admin/tables`'a yönlenince AuthGuard 403 atıyordu).
+6. **Combos (kampanya menüleri)** — commits `5e8bc3e` + `19d1ff8`:
+   - Yeni entity'ler: `Combo` (Name, Price, IsActive) + `ComboItem` (slot: kategori + adet).
+   - Migration `AddCombos` (20260510010000): combos + combo_items + combo_combo_items tabloları. `[DbContext]+[Migration]` attribute fix (`19d1ff8`) — assembly scan'de discover edilebilsin.
+   - `IComboService` + `ComboService` (CRUD), `CombosController` (Manager: Create/Update/Delete; authed: List/Get), `POST /api/orders/{id}/combos`.
+   - `OrderService.AddComboAsync` tek snapshot `OrderItem` yaratır: `ProductName=combo.Name`, `UnitPrice=combo.Price`, `Notes="Slot1: A, B | Slot2: C"`. `ProductId` slot'tan seçilen ilk ürüne bağlanır (FK için), snapshot fields combo'dan override eder — mevcut OrderItem şeması değişmedi.
+   - Frontend: `/admin/combos` CRUD (slot editor inline), sidebar'da "Kampanyalar" linki (Sparkles ikonu), `pos/table/[id]` "Kampanyalar" sekmesi + slot-bazlı `combo-picker-dialog`.
+7. **Electron tek-binary offline-first kasa** — commit `6c9e43c`:
+   - Kasa içinde .NET API + Next.js standalone frontend birlikte gömülür. Tek installer (.exe), iki child process, kapanışta ikisi de kill.
+   - `AuthCookie`: SameSite/Secure artık `request.IsHttps`'e bakar (env'e değil) → cloud HTTPS=None+Secure, kasa HTTP localhost=Lax. Tek build iki konuma uyar.
+   - `Program.cs` CORS: localhost / 127.0.0.1 her port HER ZAMAN allow (Electron'da iki child process iki free port'ta çalışır).
+   - `frontend/next.config.ts` output=`standalone`; `lib/env.ts` runtime API URL detect (`window.location.hostname=localhost` → `http://<host>:5000`).
+   - Electron `main.ts`: ikinci child process (Next standalone, free port, `ELECTRON_RUN_AS_NODE` ile yerleşik Node executable). API/frontend ikisi de `waitOn` health check'inden geçer; 3 crash → kapanış.
+   - `scripts/publish-frontend.ps1` + `electron-builder.yml` extraResources `frontend`; `npm run publish-all` = publish-api + publish-frontend + electron-builder.
+8. **Rebrand PizzaPos → NodaPos** — commit `cc3da90`:
+   - Sidebar "P" → "N" rozet, "PizzaPos" → "NodaPos" tüm sayfalarda, `favicon.ico` silindi, `app/icon.png` eklendi (Next.js otomatik favicon). Backend repo/assembly adı **PizzaPos.Api** kaldı — sadece kullanıcıya görünen brand değişti.
+9. **USB HID Caller ID + Paket/Kurye akışı + Ürün seçenek presetleri** — commit `ef89428`:
+   - **Backend:**
+     - `IncomingCall` entity + `IncomingCallStatus` enum (New/Handled/Missed/Ignored), `IncomingCallService` (telefon E.164 normalize + Customer.Phone match + son-7-hane fallback ILike), `IncomingCallsController` (POST/GET/PATCH-resolve/PATCH-note), 3 yeni outbox event tipi (Received/Resolved/NoteUpdated).
+     - `Order` entity: `DeliveryAddressSnapshot`, `DeliveryDistrict`, `FulfillmentStatus` enum, `AssignedCourierUserId`, `OutForDeliveryAt`, `DeliveredAt`, `IncomingCallId`.
+     - `OrderService.CreateDeliveryAsync` masasız (Takeaway/Delivery) sipariş; customer + adres snapshot + IncomingCallId varsa çağrıyı otomatik Handled+ResolvedOrderId kapatır.
+     - Migration `AddIncomingCallsAndDeliveryFields` (20260510120000).
+   - **Electron (kasa):**
+     - `node-hid` + `usb` + `@electron/rebuild` deps, `asarUnpack` ayarı.
+     - `hid/caller-id-listener.ts`: VID `0x1A86` PID `0xE008` auto-discover, hot-plug reconnect (exponential backoff), 5sn debounce, test modu.
+     - `hid/parsers/wch-1a86-e008.ts`: **STUB** — `feed()` şu an "unknown" döner; protokol netleşince burası tek dokunuşta parser'a dönüşür. Kablo gelmeden gerisi hazır.
+     - `services/incoming-call-bridge.ts`: backend POST + session.cookies auth + IPC broadcast.
+     - `scripts/hid-probe.ts` (npm run hid-probe): reverse-engineering aracı, cihaz listesi + ham hex+ASCII raporları loga basar.
+     - `preload.ts`: `contextBridge.exposeInMainWorld("callerId", {...})`.
+   - **Frontend:**
+     - `IncomingCallProvider` + `IncomingCallModal` global inject (kayıtlı müşteri = isim + son adres + son 3 sipariş; kayıtsız = direkt yeni sipariş).
+     - `app/pos/delivery/new`: Takeaway/Delivery toggle, CustomerSearch, kayıtlı adres seç veya elle yaz, kategori grid + seçenek dialog'u.
+     - `app/print/courier-slip/[orderId]`: 80mm fiş — büyük punto müşteri/telefon/adres + ürün+seçenek özeti + ödeme durumu + kurye imza alanı.
+     - `app/pos/calls` günlük çağrı geçmişi (15sn auto-refresh); `app/admin/calls` KPI + top 5 arayan + tarih aralığı; `app/admin/settings/caller-id` cihaz durumu + canlı test modu.
+     - **`product-options-editor` yeniden yazıldı** — Boyut preset (Küçük/Orta/Büyük + ek fiyatlar, zorunlu radio) ve Ekstra Malzeme preset (n satır, opsiyonel checkbox) tek tıkla birden fazla seçeneği POST eder; grup grup gösterim + inline edit; eski tek-satır "Özel" form Kenar/Sos gibi gruplar için saklı.
+     - `lib/phone-normalize.ts` (E.164 + TR yerel format).
+
+### Çalışma Ağacında Bekleyen (uncommitted)
+
+- `backend/PizzaPos.Api/PizzaPos.Api.csproj` (+1): `<IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>` — self-contained single-file publish'in native lib'leri içine alması için.
+- `electron/electron-builder.yml` (+5): `npmRebuild: false` (NAPI ABI stable olduğu için electron-rebuild gerekmiyor, VS 2026 + node-gyp uyumsuzluğunu da bypass eder).
+- `electron/resources/` untracked: `resources/api/` zaten `electron/.gitignore`'da ama `resources/frontend/` ignore'da değil. Build çıktısı (.next + node_modules dahil ~100MB+); **gitignore'a `resources/frontend/` eklenmeli**.
+
+### Mevcut Sağlık Tablosu (2026-05-11)
+
+| Konu | Durum |
+|---|---|
+| Backend build (Postgres) | ✅ 0 hata 0 uyarı |
+| Frontend build | ✅ Vercel deploy yeşil |
+| Cloud Postgres migration zinciri | ✅ (`AddCombos` + `AddIncomingCallsAndDeliveryFields` elle SQL ile uygulandı — `__EFMigrationsHistory`'e kayıt manuel atıldı) |
+| Cloud API health endpoint | ✅ `https://api.nodapos.com/api/health` 200 |
+| Supervisor onay → Manager creation | ✅ Random parola üretip ekranda gösteriyor |
+| Manager login (cloud + kasa) | ✅ Username-only çalışıyor |
+| Combos (kampanya menüleri) | ✅ admin CRUD + kasa "Kampanyalar" sekmesi |
+| Kasa tek-binary Electron installer | ✅ `npm run publish-all` ile NSIS .exe üretiliyor |
+| Caller ID parser | ⚠️ STUB (`wch-1a86-e008.ts feed() → "unknown"`); kablo geldiğinde protokol parser'ı yazılacak |
+| Paket/Kurye akışı (delivery) | ✅ uçtan uca; courier-slip yazdırılıyor |
+| Ürün seçenek presetleri (Boyut/Ekstra) | ✅ tek tıkla bulk POST |
+| Rebrand PizzaPos → NodaPos | ✅ frontend; backend assembly adı `PizzaPos.Api` kaldı |
+| Kasa cloud sync E2E test | ⏳ tek-binary üretildi, gerçek sipariş senaryosu lokal test bekliyor |
+
+---
+
+## Tamamlananlar Kronolojisi (2026-05-09)
 
 ### Tamamlanan
 
@@ -163,57 +241,64 @@ Yönetici Paneli: Mobil uyumlu, günlük/haftalık ciro grafikleri ve stok/fiyat
   # → http://localhost:3000
   ```
 
-### Sırada (gün sonu durumu — yarın buradan devam)
+### Sırada
 
-**Bugün (2026-05-09) son durum:**
-- Sprint 0-6 tamamlandı (multi-provider backend + outbox/sync + Electron iskelet + shadcn tasarım sistemi + UI v1 yenilemesi).
-- `npm install` + `npm run build` + backend `dotnet build` (Postgres mode) hepsi **0 hata** ile geçti.
-- Backend (5000) + frontend dev server (3000) **paralel çalışır durumda doğrulandı** (health check 200 + 200).
-- Brand renk default sıcak portakal (`--primary: 24 95% 53%`) uygulandı.
-- Görsel test (kullanıcı tarayıcıda) bugün başladı; bulgular yarın işlenecek.
+1. **Termal fiş yazıcısı entegrasyonu (Electron silent print) — ÖNCELİK 1:**
+   - **Onaylı kararlar (2026-05-11):** Tek default yazıcı; masa adisyonu + kurye fişi (mutfak fişi/KDS backlog'da); HTML render yaklaşımı (ESC/POS binary yok).
+   - **Mimari:** `electron/src/services/print-service.ts` (yeni) hidden `BrowserWindow({show:false})` açar → `loadURL("/print/<type>/<orderId>?silent=1")` → `webContents.print({ silent: true, deviceName, margins:{marginType:"none"} })`. IPC: `printer:print`, `printer:list`, `printer:set-default`, `printer:get-default`.
+   - **Frontend:** `/print/*` sayfaları `?silent=1` query okuyup `auto window.print()` çağrısını ATLA (çift print önler). Preload `window.printer.{print,listPrinters,setDefault,getDefault}`.
+   - **Ayar sayfası:** `/admin/settings/printer` — `webContents.getPrintersAsync()` listeden seç + "Test Çıktısı" butonu. Ayar kasa-lokal (`electron-store` veya `userData/printer.json`) — cloud sync ETMEZ.
+   - **Otomatik tetikleme:** `OrderService.CompleteAsync` response sonrası → `window.printer?.print(orderId, "receipt")`; `/pos/delivery/new` create sonrası → `printer?.print(orderId, "courier-slip")`.
+   - **Fallback:** `window.printer` undefined (web ortamı) → eski davranış (yeni tab + manuel print). Yazıcı seçili değilse toast + ayarlar linki. Print fail → toast + manuel fallback.
+   - **Süre tahmini:** ~3 saat (IPC+hidden window 1h, frontend silent query+auto-trigger 30dk, settings sayfası 45dk, gerçek yazıcı veya "Microsoft Print to PDF" ile test 30dk, installer rebuild). Mevcut akışları KIRMAZ.
 
-**Yarın başlanacak:**
+2. **POS Paket sekmesi (test sonrası gerekirse):**
+   - `/pos` ana sayfaya 3 sekme: Masalar / Paket / Kurye.
+   - Paket tab'ı: aktif Takeaway+Delivery siparişleri liste, FulfillmentStatus filtresi (Hazırlanıyor/Yolda/Teslim), kuryeye atama butonu (`AssignedCourierUserId` set).
+   - Caller ID modal + `/pos/delivery/new` akışı zaten var — sadece "merkezi liste/dashboard" eksik.
+   - Önce kullanıcı mevcut sistemi test edip karar verecek.
 
-1. **Görsel test bulgularını işle** — kullanıcının tarayıcıda gördüğü bug/iyileştirme isteklerini düzelt. Öncelik: `/login`, `/admin` (KPI dashboard), `/pos` masa ızgarası, `/pos/table/[id]` sipariş ekranı.
+3. **Caller ID HID parser implementasyonu (kablo geldiğinde 1 saatlik iş):**
+   - `electron/src/hid/parsers/wch-1a86-e008.ts` `feed()` şu an "unknown" döner.
+   - `npm run hid-probe` ile cihaza arama yaptır, log'a düşen ham hex frame'lerden offset/protokol çıkar.
+   - Sonra `feed()` byte stream → `{ phone, lineNumber, ringStartedAt }` parse etsin.
+   - Test: `/admin/settings/caller-id` test modu canlı hex'i gösteriyor, oradan doğrula.
 
-2. **Diğer admin sayfaları → ui-v2 migration (opsiyonel, brand uyumlu olduğu için aciliyet yok):**
-   - Pilot: `/admin/orders` (en sık bakılan tablo).
-   - Sıra: `/admin/products` (product-options-editor dahil) → `/admin/customers` (CustomerSearch dahil) → `/admin/categories`, `/admin/tables`, `/admin/users`.
-   - Tüm form'larda `react-hook-form + zod` kullanmaya geçiş (zaten dependency var).
-   - Tabloları `shadcn DataTable` pattern'ine çevir (sortable, filterable).
+2. **Faz D — Raporlar & Vardiya (Faz C tamamlandığı için sıradaki büyük iş):**
+   - `CashierSession` entity, vardiya aç/kapat zorunlu, açılış-kapanış nakit sayımı.
+   - Z-Rapor (`/admin/reports/z-report`) — günlük ciro+ödeme yöntemi kırılımı+iptal/iade özeti.
+   - İndirim akışı + Manager PIN (kasiyer manuel indirim isterse PIN ister).
+   - İptal/iade sebep zorunlu (`Order.CancelReason` enum + serbest not).
 
-3. **Modal dialog'ları Sheet'e çevir (kasa UX):**
-   - `pos/table/[id]/options-dialog.tsx` → `Sheet side="bottom"` (mobil-style).
-   - `pos/table/[id]/payment-dialog.tsx` ve `details-dialog.tsx` → `Dialog` (shadcn ui-v2).
+3. **Faz E — Operasyonel polish:**
+   - `/admin/settings` (mağaza adres/telefon/vergi no — fiş header'ına yansır).
+   - Stok ışığı (`Product.StockOnHand` + `MinStockThreshold`, otomatik düşürme yok ama kart üzerinde renk).
+   - Ürün resmi (lokal disk + cloud Supabase Storage replication).
+   - Ürün uygunluk takvimi (`AvailableFromHour/ToHour` — örn. öğle menüsü sadece 11:00-15:00).
+
+4. **Modal dialog'ları Sheet'e çevir (kasa UX, devam ediyor):**
+   - `pos/table/[id]/options-dialog.tsx` → `Sheet side="bottom"` (mobil-style touch).
+   - `payment-dialog.tsx` ve `details-dialog.tsx` → shadcn ui-v2 `Dialog`.
    - Eski `components/ui/Modal.tsx`'i tamamen kaldır.
 
-4. **SQLite migration üretimi (kasa offline ilk başlatma için):**
-   ```powershell
-   cd backend\PizzaPos.Api
-   $env:DOTNET_ROLL_FORWARD = "Major"; $env:Database__Provider = "Sqlite"; $env:Database__SqlitePath = "pos.db"
-   # Postgres snapshot'ını yedekle, sonra:
-   dotnet ef migrations add SqliteInitialCreate -o Migrations/Sqlite
-   # Snapshot'ı geri al (üst yedekle değiştir).
-   dotnet ef database update
-   ```
-   `Migrations/Sqlite/README_TODO.md` detayı içerir. Snapshot çakışması açıklanmış.
+5. **Diğer admin sayfaları → ui-v2 migration (opsiyonel, brand uyumlu):**
+   - Pilot: `/admin/orders` (en sık bakılan tablo).
+   - Sıra: `/admin/products` (product-options-editor zaten yeni yazıldı — ui-v2 değil ama brand uyumlu) → `/admin/customers` → `/admin/categories`, `/admin/tables`, `/admin/users`.
+   - Form'larda `react-hook-form + zod` kullanmaya geçiş (deps zaten var).
+   - Tabloları `shadcn DataTable` pattern'ine çevir.
 
-5. **Electron'u uçtan uca dene:**
-   - `electron/` klasöründe `npm install` + `npm run build`.
-   - `npm run publish-api` ile .NET self-contained binary üret (`electron/resources/api/PizzaPos.Api.exe`).
-   - Frontend dev server açıkken `npm start` — Electron penceresi `http://localhost:3000`'e bağlansın, child process API SQLite mode'da `pos.db` üretmeli.
-   - Sync test: `appsettings.Development.json`'a `Sync:HmacSecret` (32+ char) + `Sync:CloudBaseUrl` ekle, `Sync:Enabled = true`. Lokal kasada birkaç sipariş aç, `outbox_events` tablosunu kontrol et, cloud'a gitti mi.
+6. **Kasa cloud sync E2E test (lokal):**
+   - `npm run publish-all` ile NSIS installer üret veya `npm run dev`'le Electron çalıştır.
+   - `appsettings.Development.json`'a `Sync:HmacSecret` (32+ char) + `Sync:CloudBaseUrl=https://api.nodapos.com` + `Sync:Enabled=true`.
+   - Lokal kasada birkaç sipariş + müşteri + delivery aç, `outbox_events` tablosunu kontrol et, cloud'a gitti mi.
+   - Pull yönünde: cloud'dan menü değişikliği yap, kasa `Sync:PullPollingSeconds` aralığında çekiyor mu.
 
-6. **Önceden ertelenen Faz C/D/E (ileri):**
-   - **Faz C — Paket & Kurye Akışı:** `/pos` ana ekranına 3 sekme (Masalar / Paket / Kurye), `OrderType=Takeaway/Delivery`, `Order.FulfillmentStatus` enum + `AssignedDriverUserId` + `OutForDeliveryAt` + `DeliveredAt`, `POST /api/orders/{id}/advance` + `assign-driver`.
-   - **Faz D — Raporlar & Vardiya:** `CashierSession` entity, vardiya aç/kapat zorunlu, Z-Rapor (`/admin/reports/z-report`), İndirim akışı + Manager PIN, İptal/iade sebep zorunlu (`Order.CancelReason`).
-   - **Faz E — Operasyonel polish:** `/admin/settings`, stok ışığı (`Product.StockOnHand` + `MinStockThreshold`), ürün resmi (Supabase Storage), ürün uygunluk takvimi (`AvailableFromHour/ToHour`).
-
-**Backlog (sunum / canlıya çıkma sonrası):**
-- Vercel'e frontend deploy + Render'a backend deploy + keep-alive cron (14dk, GitHub Actions).
-- Cloud Supabase'de outbox_events + sync endpoint (Render'da host edilen ayrı API instance veya Supabase Edge Function).
+**Backlog:**
+- Caller ID için DialerSync/Yeahlink gibi alternatif cihaz desteği (HID parser stub'ı genelleştirilebilir).
 - KDS (mutfak ekranı) — kullanıcı listeden çıkardı, sunumdan sonra konuşulabilir.
 - `/api/reports/revenue` aggregate endpoint (hacim büyüyünce client-side gruplama yetmediğinde).
+- `electron/resources/frontend/` `.gitignore`'a eklenmeli (şu an untracked görünüyor, build çıktısı yanlışlıkla commit edilmesin).
+- Backend assembly adı hâlâ `PizzaPos.Api` — rebrand'in arkayüzü tamamlanırsa `NodaPos.Api`'ye taşımak gerekir (büyük çaplı find/replace + repo rename).
 
 ### Yarın için hızlı başlangıç
 
@@ -240,95 +325,138 @@ npm run dev
 
 ### Bilinen Eksikler / Borçlar
 
-- **Migration `AddCustomers.cs` dosyası eksik:** Sprint 6 sırasında EF tool yan etkisi olarak silindi. Supabase'in `__EFMigrationsHistory` tablosunda kayıt duruyor, runtime'da pending değil olarak görülüyor. Sadece rollback senaryosunda Down çalıştırılamaz (production'da gerek yok). Restore istenirse `dotnet ef migrations script` ile mevcut Supabase şemasından SQL üretip yeni bir migration .cs olarak yapay üretmek mümkün.
-- **`UpdateOrderDetailsRequest.customerId?` yok:** Mevcut siparişe sonradan müşteri linkleme yapılmıyor (sadece create'te). Faz C'de düzeltilecek.
-- **Fiş header'ı sadece `store.name` gösteriyor:** Adres/telefon için `LoginResponse.store`'u `StoreSummaryDto` → tam `StoreDto`'ya genişletmek gerek (Faz E ayar paneli ile).
-- **Eski `components/ui/{Button,Card,Input,Modal,Select}.tsx` hala kullanılıyor:** /admin tablo sayfaları ve dialog'lar bu eski componentleri kullanıyor. Brand uyumlu (orange-600), aciliyet yok ama tam tutarlılık için sonraki iterasyonda ui-v2'ye taşı.
-- **OptionsDialog Modal'da kaldı:** Bottom Sheet'e geçiş kasiyer UX'ini iyileştirir, yarın yapılacak.
-- **Render keep-alive cron yok:** Production deploy edilince eklenecek.
-- **Cloud Supabase'de outbox_events tablosu henüz yok:** Backend `AddCustomersAndOutbox` migration'ı henüz Supabase'e uygulanmadı (kullanıcı `dotnet ef database update` çalıştırmalı). Ayrıca cloud taraftaki SyncController için ayrı API instance veya Supabase Edge Function kurulumu sırada.
-- **Sync HMAC secret henüz set edilmedi:** `appsettings.Development.json`'a `Sync:HmacSecret` (32+ char) + `Sync:CloudBaseUrl` eklenmeli. Şu an `Sync:Enabled = false` default.
+- **Migration manuel atılanlar:** `AddCustomers.cs` (Sprint 6 EF tool yan etkisi) + `AddCombos` ve `AddIncomingCallsAndDeliveryFields` (Hetzner DB'sine elle SQL ile uygulandı + `__EFMigrationsHistory`'ye manuel insert). Production'da fark etmez ama Down rollback yapılamaz. Yeni temiz DB'de ise EF tool migration'ları otomatik uygular ([DbContext]+[Migration] attribute fix sayesinde).
+- **Production `PendingModelChangesWarning` Ignore'lu:** Snapshot drift bilinen durum (Customer + Order delivery alanları). Dev'de fail-fast kalır. Temizlik için `dotnet ef migrations add SnapshotRefresh --empty` veya snapshot'ı silip baştan üretmek gerekir (ama mevcut migration'larla uyumlu kalması için dikkat).
+- **`UpdateOrderDetailsRequest.customerId?` yok:** Mevcut siparişe sonradan müşteri linkleme yapılmıyor (sadece create'te). Düşük öncelik — kasiyer pratikte siparişin başında müşteri seçiyor.
+- **Fiş header'ı sadece `store.name` gösteriyor:** Adres/telefon/vergi no için `LoginResponse.store`'u `StoreSummaryDto` → tam `StoreDto`'ya genişletmek gerek. Faz E (`/admin/settings`) ile birlikte.
+- **Eski `components/ui/{Button,Card,Input,Modal,Select}.tsx` hâlâ kullanılıyor:** /admin tablo sayfaları + 3 kasa dialog'u. Brand uyumlu (orange-600), aciliyet yok.
+- **Kasa dialog'ları Modal'da:** `options-dialog`, `payment-dialog`, `details-dialog`. Bottom Sheet/ui-v2 Dialog'a geçiş kasiyer UX'ini iyileştirir.
+- **Caller ID parser STUB:** `wch-1a86-e008.ts feed()` "unknown" döner. Kablo gelince ham hex'ten protokol çıkar.
+- **`electron/resources/frontend/` `.gitignore`'da değil:** Build çıktısı ~100MB+, yanlışlıkla commit edilmesin diye eklenmeli. (`resources/api/` zaten ignored.)
+- **Sync HMAC secret henüz lokal dev test edilmedi:** Hetzner taraf canlı; kasa tek-binary üretildi ama `appsettings.Development.json`'a `Sync:HmacSecret` + `Sync:CloudBaseUrl=https://api.nodapos.com` + `Sync:Enabled=true` ile E2E test bekliyor.
+- **Backend assembly adı `PizzaPos.Api` (rebrand sadece UI):** İleride `NodaPos.Api`'ye taşımak repo + namespace + GitHub repo + Docker image isim değişikliği demek.
 
-### Dosya Haritası (referans)
+### Dosya Haritası (referans, 2026-05-11)
 
 ```
 backend/PizzaPos.Api/
 ├── Entities/                    BaseEntity, TenantEntity, Store, Table, Category,
 │                                Product, ProductOption, Order, OrderItem,
 │                                OrderItemOption, Payment, User, Customer,
-│                                CustomerAddress, OutboxEvent, Enums
+│                                CustomerAddress, OutboxEvent, SyncState,
+│                                Combo (+ ComboItem), IncomingCall, Enums
 ├── Data/                        AppDbContext, ITenantProvider,
 │                                SessionTenantProvider, HeaderTenantProvider,
 │                                DesignTimeDbContextFactory (provider-aware)
 ├── DTOs/                        Store/Table/Category/Product/Order/Payment/
-│                                User/Customer/Auth Dtos
+│                                User/Customer/Auth/Combo/IncomingCall Dtos
 ├── Services/                    I*Service + *Service, IOutboxEmitter +
-│                                OutboxEmitter, DomainException,
-│                                DomainExceptionHandler
+│                                OutboxEmitter, ComboService, IncomingCallService,
+│                                DomainException, DomainExceptionHandler
 ├── Auth/                        JwtTokenService, BCryptPasswordHasher,
-│                                AuthService, JwtOptions, claim helpers
-├── Sync/                        OutboxEvent (Entities), SyncOptions,
-│                                HmacSignature, SyncWorker (BackgroundService)
+│                                AuthService, AuthCookie (IsHttps-aware),
+│                                JwtOptions, claim helpers
+├── Sync/                        SyncOptions, HmacSignature, SyncWorker (push),
+│                                SyncPullWorker (cloud→kasa), IngestApplyService
 ├── Controllers/                 Health, Stores, Tables, Categories, Products,
-│                                Orders, Auth, Users, Customers,
-│                                CustomerAddresses, Sync (ingest + changes)
+│                                Orders (+ /combos), Auth, Users, Customers,
+│                                CustomerAddresses, Combos, IncomingCalls, Sync
 ├── Migrations/
 │   ├── Postgres/                InitialCreate, AddUsersAndAuditUser,
-│   │                            AddCustomersAndOutbox + Designer + ModelSnapshot
-│   └── Sqlite/                  README_TODO.md (ilk migration sabah üretilecek)
-├── Program.cs                   provider-aware DB registration, JWT bearer,
-│                                SyncWorker conditional registration
+│   │                            AddCustomersAndOutbox, AddSyncStates,
+│   │                            AddOutboxApplyTracking, AddCombos,
+│   │                            AddIncomingCallsAndDeliveryFields
+│   │                            + Designer + ModelSnapshot
+│   └── Sqlite/                  (kasa tek-binary için üretildi — README_TODO.md)
+├── Program.cs                   provider-aware DB, JWT (MapInboundClaims=false),
+│                                CORS localhost-allow, prod PendingModelChanges Ignore,
+│                                SyncWorker + SyncPullWorker conditional
 ├── appsettings.json             Database:* + Sync:* + Auth:Jwt:* placeholder
-└── appsettings.Development.json gitignore'da, gerçek Supabase pooler connection
+└── appsettings.Development.json gitignore'da
 
-electron/                        (Sprint 2 — yeni)
-├── package.json                 electron 33 + electron-builder 25 + ts 5.6
-├── tsconfig.json
-├── electron-builder.yml         NSIS installer, asar, extraResources resources/api
-├── src/main.ts                  child process orchestrator + crash recovery
-├── src/preload.ts               contextBridge minimal
-├── scripts/publish-api.ps1      .NET self-contained win-x64 single-file publish
-├── resources/api/               (publish-api.ps1 buraya çıkarır — gitignore)
-└── README.md                    dev workflow + production build
+electron/
+├── package.json                 electron 33 + electron-builder 25 + ts 5.6 +
+│                                node-hid + usb + @electron/rebuild + get-port
+├── electron-builder.yml         NSIS installer, asar + asarUnpack (node-hid/usb),
+│                                extraResources: resources/api + resources/frontend,
+│                                npmRebuild: false (NAPI ABI stable)
+├── src/
+│   ├── main.ts                  iki child process (API + Next standalone),
+│   │                            wait-on health, crash recovery (max 3),
+│   │                            caller-id listener startup, IPC handlers
+│   ├── preload.ts               contextBridge: callerId.* (rescan, listDevices,
+│   │                            setTestMode, on(call/raw/status))
+│   ├── hid/
+│   │   ├── caller-id-listener.ts   VID 0x1A86 PID 0xE008 auto-discover,
+│   │   │                            hot-plug reconnect, 5sn debounce, test modu
+│   │   ├── parsers/
+│   │   │   └── wch-1a86-e008.ts    STUB — feed() "unknown" döner; kablo gelince
+│   │   │                            tek dokunuşta protokol parser'ı yazılacak
+│   │   └── types.ts                IncomingCallEvent, DeviceInfo, ParseResult
+│   ├── services/
+│   │   └── incoming-call-bridge.ts backend POST + session.cookies auth + IPC
+│   └── scripts/hid-probe.ts        bağımsız RE aracı (npm run hid-probe) —
+│                                    cihaz listesi + ham hex+ASCII log
+├── scripts/
+│   ├── publish-api.ps1          .NET self-contained win-x64 single-file publish
+│   └── publish-frontend.ps1     Next standalone build → resources/frontend/
+├── resources/                   build çıktısı — .gitignore'da: api/ ✅, frontend/ ❌ (eklenmeli)
+└── README.md
 
 frontend/src/
 ├── app/
 │   ├── layout.tsx + globals.css AuthProvider, Tailwind v4 + shadcn HSL token,
 │   │                            tw-animate-css, brand orange (--primary)
+│   ├── icon.png                 NodaPos favicon (Next.js otomatik)
 │   ├── page.tsx                 landing redirect (auth role'üne göre)
-│   ├── design/page.tsx          shadcn primitive showcase (preview)
-│   ├── login/page.tsx           ui-v2 (Card + Input + Label + Select + Pizza)
-│   ├── setup/page.tsx           ui-v2 (Card + Input + Label + Pizza)
+│   ├── design/page.tsx          shadcn primitive showcase
+│   ├── login/page.tsx           username-only login (StoreId opsiyonel)
+│   ├── setup/page.tsx
+│   ├── register/page.tsx        restoran başvuru formu
+│   ├── supervisor/
+│   │   ├── login/page.tsx
+│   │   └── registrations/page.tsx  approve dialog: random parola üretici +
+│   │                                "Hesap Oluşturuldu" özet (kopya butonları)
 │   ├── admin/
-│   │   ├── layout.tsx           sidebar lucide ikonları + brand "P" logo
-│   │   ├── page.tsx             KPI Card + Skeleton + recharts
-│   │   ├── revenue-charts.tsx
-│   │   ├── categories/page.tsx  (eski ui/ — ui-v2 migration sırada)
-│   │   ├── tables/page.tsx
-│   │   ├── products/{page,product-options-editor}.tsx
-│   │   ├── orders/page.tsx
+│   │   ├── layout.tsx           sidebar lucide + "N" brand badge
+│   │   ├── page.tsx             KPI Card + Skeleton + revenue-charts
+│   │   ├── categories/, tables/, orders/, users/  (eski ui/)
+│   │   ├── products/page.tsx + product-options-editor.tsx
+│   │   │                        Boyut/Ekstra preset bulk-POST, grup grup gösterim
 │   │   ├── customers/page.tsx
-│   │   └── users/page.tsx
+│   │   ├── combos/page.tsx              Kampanya menüleri CRUD + slot editor
+│   │   ├── calls/page.tsx               KPI + top 5 + tarih aralığı (caller ID)
+│   │   └── settings/caller-id/page.tsx  cihaz durumu + test modu
 │   ├── pos/
-│   │   ├── layout.tsx           AuthGuard role=Cashier
-│   │   ├── page.tsx             masa ızgarası (kart + durum şeridi + Badge)
+│   │   ├── layout.tsx           AuthGuard role=Cashier + IncomingCallProvider + Modal
+│   │   ├── page.tsx             masa ızgarası
+│   │   ├── calls/page.tsx       günlük çağrı geçmişi (15sn auto-refresh)
+│   │   ├── delivery/new/page.tsx + delivery-order-screen.tsx
+│   │   │                        Takeaway/Delivery toggle, CustomerSearch,
+│   │   │                        kayıtlı adres veya elle, kategori grid + dialog
 │   │   └── table/[id]/
-│   │       ├── page.tsx                   async params (Next 16)
-│   │       ├── order-screen.tsx           ui-v2 Button (touch) + Badge
-│   │       ├── options-dialog.tsx         (eski Modal — Sheet'e migrate sırada)
-│   │       ├── payment-dialog.tsx         (eski Modal)
-│   │       └── details-dialog.tsx         (eski Modal + CustomerSearch)
-│   └── print/receipt/[orderId]/  80mm fiş layout, auto window.print()
+│   │       ├── page.tsx                   async params
+│   │       ├── order-screen.tsx           ui-v2 + "Kampanyalar" sekmesi
+│   │       ├── combo-picker-dialog.tsx    slot-bazlı seçim modal'ı
+│   │       ├── options-dialog.tsx         (Modal — Sheet'e migrate sırada)
+│   │       ├── payment-dialog.tsx         (Modal)
+│   │       └── details-dialog.tsx         (Modal + CustomerSearch)
+│   └── print/
+│       ├── receipt/[orderId]/    80mm fiş, auto window.print()
+│       └── courier-slip/[orderId]/courier-slip-view.tsx
+│                                  büyük punto müşteri/telefon/adres + ürün+seçenek
+│                                  + ödeme durumu + kurye imza alanı
 ├── components/
 │   ├── AuthGuard, UserMenu, CustomerSearch
+│   ├── incoming-call/IncomingCallModal.tsx  kayıtlı müşteri kartı veya yeni akış
 │   ├── ui/                      eski sistem (Button, Card, Input, Modal, Select)
-│   │                            — orange brand, ui-v2 migration sırada
-│   └── ui-v2/                   shadcn primitive (Sprint 3 — yeni)
-│       button, card, dialog, sheet, input, label, badge, skeleton,
-│       separator, tabs, select, empty-state, toaster
-├── lib/                         api, env, format, auth-context, store-context,
-│                                use-store-api, utils (cn helper)
-└── types/api.ts                 backend DTO'larını birebir aynalar
+│   └── ui-v2/                   shadcn primitive (button, card, dialog, sheet,
+│                                input, label, badge, skeleton, separator, tabs,
+│                                select, empty-state, toaster)
+├── lib/                         api, env (runtime API URL detect), format,
+│                                auth-context, store-context, use-store-api,
+│                                utils, phone-normalize, incoming-call-listener
+└── types/                       api.ts (DTO mirror), electron.d.ts (window.callerId)
 ```
 
 ### Rapor Dosyaları (repo kökü)

@@ -156,7 +156,7 @@ public class SyncController : ControllerBase
 
         var serverNow = DateTime.UtcNow;
         var sinceUtc = since;
-        var wanted = (aggregates ?? "Product,Category,Store,User,Customer,CustomerAddress")
+        var wanted = (aggregates ?? "Product,Category,Store,User,Customer,CustomerAddress,Combo")
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(s => s.ToLowerInvariant())
             .ToHashSet();
@@ -180,6 +180,14 @@ public class SyncController : ControllerBase
             var q = _db.Products.IgnoreQueryFilters().Include(p => p.Options).AsQueryable();
             if (sinceUtc.HasValue) q = q.Where(x => (x.UpdatedAt ?? x.CreatedAt) > sinceUtc.Value);
             result["products"] = await q.ToListAsync(ct);
+        }
+        if (wanted.Contains("combo"))
+        {
+            // Combo is cloud-owned (Manager-only writes). Items collection is
+            // included so the kasa gets the full slot definition in one call.
+            var q = _db.Combos.IgnoreQueryFilters().Include(c => c.Items).AsQueryable();
+            if (sinceUtc.HasValue) q = q.Where(x => (x.UpdatedAt ?? x.CreatedAt) > sinceUtc.Value);
+            result["combos"] = await q.ToListAsync(ct);
         }
         if (wanted.Contains("user"))
         {

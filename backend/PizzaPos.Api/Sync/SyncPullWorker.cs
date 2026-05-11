@@ -22,7 +22,7 @@ namespace PizzaPos.Api.Sync;
 public class SyncPullWorker : BackgroundService
 {
     private static readonly string[] DefaultAggregates =
-        { "Store", "Category", "Product", "User", "Customer", "CustomerAddress" };
+        { "Store", "Category", "Product", "Combo", "User", "Customer", "CustomerAddress" };
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IHttpClientFactory _httpFactory;
@@ -152,6 +152,8 @@ public class SyncPullWorker : BackgroundService
             totalApplied += await UpsertSimpleAsync<Category>(db, cats, ct);
         if (data.TryGetProperty("products", out var prods))
             totalApplied += await UpsertProductsAsync(db, prods, ct);
+        if (data.TryGetProperty("combos", out var combos))
+            totalApplied += await UpsertCombosAsync(db, combos, ct);
         if (data.TryGetProperty("users", out var users))
             totalApplied += await UpsertSimpleAsync<User>(db, users, ct);
         if (data.TryGetProperty("customers", out var customers))
@@ -249,6 +251,40 @@ public class SyncPullWorker : BackgroundService
             }
         }
         return products.Count;
+    }
+
+    private static async Task<int> UpsertCombosAsync(
+        AppDbContext db, JsonElement arr, CancellationToken ct)
+    {
+        if (arr.ValueKind != JsonValueKind.Array || arr.GetArrayLength() == 0) return 0;
+
+        // Same replace-children semantics as products: combos are cloud-owned,
+        // slot definitions are overwritten wholesale on each pull.
+        var combos = JsonSerializer.Deserialize<List<Combo>>(arr.GetRawText(), _jsonOpts) ?? new();
+        if (combos.Count == 0) return 0;
+
+        var ids = combos.Select(c => c.Id).ToList();
+        var existing = await db.Combos.IgnoreQueryFilters()
+            .Include(c => c.Items)
+            .Where(c => ids.Contains(c.Id))
+            .ToDictionaryAsync(c => c.Id, ct);
+
+        foreach (var c in combos)
+        {
+            if (existing.TryGetValue(c.Id, out var local))
+            {
+                db.Entry(local).CurrentValues.SetValues(c);
+                db.ComboItems.RemoveRange(local.Items);
+                local.Items.Clear();
+                foreach (var it in c.Items)
+                    local.Items.Add(it);
+            }
+            else
+            {
+                db.Combos.Add(c);
+            }
+        }
+        return combos.Count;
     }
 
     /// <summary>

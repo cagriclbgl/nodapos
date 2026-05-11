@@ -28,3 +28,8 @@ asarUnpack:
   - node_modules/node-hid/**
   - node_modules/usb/**
   - node_modules/@serialport/**
+# node-hid ve usb NAPI prebuilt binary'leri zaten elimizde (HID-win32-x64
+# ve win32-x64 klasörleri). electron-builder'ın varsayılan olarak çalıştırdığı
+# electron-rebuild, bu makinede VS 2026 + node-gyp uyumsuzluğu nedeniyle
+# fail oluyor. NAPI ABI stable olduğundan rebuild'e gerek yok.
+npmRebuild: false

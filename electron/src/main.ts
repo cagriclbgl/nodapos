@@ -7,6 +7,7 @@ import getPort from "get-port";
 import waitOn from "wait-on";
 import { CallerIdListener } from "./hid/caller-id-listener";
 import { IncomingCallBridge } from "./services/incoming-call-bridge";
+import { CLOUD_API_BASE_URL, HMAC_SECRET } from "./config";
 
 let apiProcess: ChildProcess | null = null;
 let frontendProcess: ChildProcess | null = null;
@@ -67,8 +68,10 @@ async function startApi(): Promise<number> {
 
   log(`Starting API: exe=${exe} port=${port} db=${dbPath}`);
 
-  const cloudUrl = process.env.PIZZAPOS_CLOUD_URL ?? "";
-  const hmacSecret = process.env.PIZZAPOS_HMAC_SECRET ?? "";
+  // Cloud sync env'leri: önce process env (dev override için), yoksa
+  // build-time config (src/config.ts — gitignored, binary'ye gömülü).
+  const cloudUrl = process.env.PIZZAPOS_CLOUD_URL || CLOUD_API_BASE_URL;
+  const hmacSecret = process.env.PIZZAPOS_HMAC_SECRET || HMAC_SECRET;
 
   apiProcess = spawn(exe, [], {
     cwd: apiDir,
