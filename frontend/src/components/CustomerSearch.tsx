@@ -51,6 +51,12 @@ export function CustomerSearch({
     phone: "",
     notes: null,
   });
+  // Opsiyonel ilk adres — doldurulursa Customer create sonrasi CustomerAddress
+  // yaratilir (IsDefault=true). Sonraki cagrilarda otomatik gelir.
+  const [newAddress, setNewAddress] = useState({
+    addressLine: "",
+    district: "",
+  });
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
@@ -134,6 +140,7 @@ export function CustomerSearch({
       phone: /^[0-9 +()-]+$/.test(query.trim()) ? query.trim() : "",
       notes: null,
     });
+    setNewAddress({ addressLine: "", district: "" });
     setCreateError(null);
     setCreating(true);
   };
@@ -151,6 +158,25 @@ export function CustomerSearch({
         phone: newDraft.phone.trim(),
         notes: newDraft.notes?.trim() || null,
       });
+      // Adres opsiyonel — sadece AddressLine doldurulduysa CustomerAddress
+      // yaratilir, default isaretlenir. Sonraki cagrilarda otomatik secilir.
+      const addrLine = newAddress.addressLine.trim();
+      if (addrLine.length > 0) {
+        try {
+          await customersApi.addAddress(created.id, {
+            label: "Ev",
+            addressLine: addrLine,
+            district: newAddress.district.trim() || null,
+            notes: null,
+            isDefault: true,
+          });
+        } catch (addrErr) {
+          // Adres yaratma fail ederse muhsteri yine yarali kalir; sadece uyari.
+          // Kasiyer sonra /admin/customers'tan veya delivery sayfasinda elle
+          // yazabilir. Submit'i bloke etme.
+          console.warn("Address create failed", addrErr);
+        }
+      }
       onChange({ id: created.id, name: created.name, phone: created.phone });
       setCreating(false);
       setQuery("");
@@ -274,6 +300,24 @@ export function CustomerSearch({
                 className="h-10 w-full rounded-lg border border-zinc-300 bg-white px-2.5 text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 dark:border-zinc-700 dark:bg-zinc-950"
               />
               <textarea
+                value={newAddress.addressLine}
+                onChange={(e) =>
+                  setNewAddress({ ...newAddress, addressLine: e.target.value })
+                }
+                placeholder="Adres (opsiyonel — boş bırakırsan sipariş ekranında yazarsın)"
+                rows={2}
+                className="w-full rounded-lg border border-zinc-300 bg-white p-2 text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+              />
+              <input
+                type="text"
+                value={newAddress.district}
+                onChange={(e) =>
+                  setNewAddress({ ...newAddress, district: e.target.value })
+                }
+                placeholder="Mahalle / Semt (opsiyonel)"
+                className="h-10 w-full rounded-lg border border-zinc-300 bg-white px-2.5 text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+              />
+              <textarea
                 value={newDraft.notes ?? ""}
                 onChange={(e) =>
                   setNewDraft({
@@ -281,7 +325,7 @@ export function CustomerSearch({
                     notes: e.target.value || null,
                   })
                 }
-                placeholder="Not (opsiyonel)"
+                placeholder="Müşteri notu (opsiyonel)"
                 rows={2}
                 className="w-full rounded-lg border border-zinc-300 bg-white p-2 text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 dark:border-zinc-700 dark:bg-zinc-950"
               />
