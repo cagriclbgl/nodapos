@@ -24,11 +24,13 @@ public class CustomerService : ICustomerService
     public async Task<IReadOnlyList<CustomerListItemDto>> SearchAsync(string? search, CancellationToken ct = default)
     {
         var query = _db.Customers.AsQueryable();
+        var hasSearch = !string.IsNullOrWhiteSpace(search);
 
-        if (!string.IsNullOrWhiteSpace(search))
+        if (hasSearch)
         {
-            var term = search.Trim();
-            // EF.Functions.ILike → Postgres ILIKE (case-insensitive partial match).
+            var term = search!.Trim();
+            // EF.Functions.ILike → Postgres ILIKE; SQLite tarafinda EF Core
+            // bunu case-sensitive LIKE'a duser, kasada da makul fallback.
             var pattern = $"%{term}%";
             query = query.Where(c =>
                 EF.Functions.ILike(c.Name, pattern) ||
@@ -38,8 +40,13 @@ public class CustomerService : ICustomerService
         // Project + correlated subqueries so OrderCount/LastOrderAt are computed
         // entirely server-side. Match by either CustomerId (preferred) OR legacy
         // CustomerPhone fallback so customers created before Faz B still resolve.
-        var rows = await query
-            .OrderBy(c => c.Name)
+        // Search yoksa "son kayit ust" — kasiyer son musteriyi listede goruyor.
+        // Search varsa alphabetic — eslesen sonuclar tahmin edilebilir sirada.
+        var ordered = hasSearch
+            ? query.OrderBy(c => c.Name)
+            : query.OrderByDescending(c => c.CreatedAt);
+
+        var rows = await ordered
             .Take(SearchResultLimit)
             .Select(c => new CustomerListItemDto(
                 c.Id,

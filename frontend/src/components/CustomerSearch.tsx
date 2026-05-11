@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Plus, Search, Users, X } from "lucide-react";
 import { customers as customersApi, ApiError } from "@/lib/api";
 import { describeError } from "@/lib/use-store-api";
-import type {
-  CreateCustomerRequest,
-  CustomerListItemDto,
-} from "@/types/api";
+import { formatPhoneForDisplay } from "@/lib/phone-normalize";
+import { Button } from "@/components/ui-v2/button";
+import { Skeleton } from "@/components/ui-v2/skeleton";
+import { EmptyState } from "@/components/ui-v2/empty-state";
+import type { CustomerListItemDto } from "@/types/api";
 
 export interface SelectedCustomer {
   id: string;
@@ -25,12 +27,13 @@ interface Props {
 }
 
 /**
- * Phone/name typeahead that hits `GET /api/customers?search=...` after a
- * 250ms debounce. Renders a suggestion list and a "Yeni Müşteri" inline form
- * that creates a record (then auto-selects it) without leaving the dialog.
+ * Customer picker — açılışta backend'den son N müşteri çekilir (recent-first).
+ * Üstte filtre input'u (client-side: ad/telefon partial match). Yeni müşteri
+ * butonu tam alan dialog'u açar (Ad + Telefon + Adres + Mahalle + Not).
  *
- * The component aborts in-flight requests on each keystroke so a slow
- * response can never overwrite a fresher query.
+ * Eski "type-3-chars-then-search" yaklaşımının yerine: kasiyer açılışta ne
+ * gördüğünü bilir (son müşteriler), aramaya başlarsa daraltır. Bilgisayar
+ * deneyimi olmayan kullanıcı için tahmin edilebilir.
  */
 export function CustomerSearch({
   value,
@@ -38,319 +41,366 @@ export function CustomerSearch({
   disabled,
   hideCreate,
 }: Props) {
+  const [allCustomers, setAllCustomers] = useState<CustomerListItemDto[]>([]);
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<CustomerListItemDto[]>([]);
-  const [open, setOpen] = useState(false);
-  const [searching, setSearching] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  // "Yeni Müşteri" inline form state.
-  const [creating, setCreating] = useState(false);
-  const [newDraft, setNewDraft] = useState<CreateCustomerRequest>({
-    name: "",
-    phone: "",
-    notes: null,
-  });
-  // Opsiyonel ilk adres — doldurulursa Customer create sonrasi CustomerAddress
-  // yaratilir (IsDefault=true). Sonraki cagrilarda otomatik gelir.
-  const [newAddress, setNewAddress] = useState({
-    addressLine: "",
-    district: "",
-  });
-  const [createBusy, setCreateBusy] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
 
-  const abortRef = useRef<AbortController | null>(null);
-  const wrapperRef = useRef<HTMLDivElement | null>(null);
-
-  // Debounced search.
+  // İlk yüklemede son N müşteri (backend recent-first dönüyor).
   useEffect(() => {
-    const trimmed = query.trim();
-    if (trimmed.length < 3) {
-      setResults([]);
-      setSearching(false);
-      // Don't fire an API call yet, but keep the dropdown reactive to focus.
-      return;
-    }
-    setSearching(true);
-    setError(null);
-    abortRef.current?.abort();
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
-
-    const handle = window.setTimeout(async () => {
-      try {
-        const data = await customersApi.list(
-          { search: trimmed },
-          ctrl.signal
-        );
-        if (!ctrl.signal.aborted) {
-          setResults(data);
-          setSearching(false);
-        }
-      } catch (err) {
-        if (ctrl.signal.aborted) return;
-        // Aborts surface as DOMException("AbortError") on some runtimes.
-        if (err instanceof DOMException && err.name === "AbortError") return;
-        setError(
-          err instanceof ApiError ? err.detail || err.message : String(err)
-        );
-        setSearching(false);
-      }
-    }, 250);
-
-    return () => {
-      window.clearTimeout(handle);
-      ctrl.abort();
-    };
-  }, [query]);
-
-  // Close suggestions on outside-click.
-  useEffect(() => {
-    if (!open) return;
-    const onDocClick = (e: MouseEvent) => {
-      if (
-        wrapperRef.current &&
-        !wrapperRef.current.contains(e.target as Node)
-      ) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, [open]);
-
-  const select = (c: CustomerListItemDto) => {
-    onChange({ id: c.id, name: c.name, phone: c.phone });
-    setQuery("");
-    setResults([]);
-    setOpen(false);
-  };
-
-  const clear = () => {
-    onChange(null);
-    setQuery("");
-    setResults([]);
-  };
-
-  const startCreate = () => {
-    setNewDraft({
-      // Pre-fill phone if user typed digits.
-      name: "",
-      phone: /^[0-9 +()-]+$/.test(query.trim()) ? query.trim() : "",
-      notes: null,
-    });
-    setNewAddress({ addressLine: "", district: "" });
-    setCreateError(null);
-    setCreating(true);
-  };
-
-  const submitCreate = async () => {
-    if (!newDraft.name.trim() || !newDraft.phone.trim()) {
-      setCreateError("Ad ve telefon zorunlu.");
-      return;
-    }
-    setCreateBusy(true);
-    setCreateError(null);
-    try {
-      const created = await customersApi.create({
-        name: newDraft.name.trim(),
-        phone: newDraft.phone.trim(),
-        notes: newDraft.notes?.trim() || null,
+    if (value) return; // Seçili müşteri varsa liste yüklemeye gerek yok.
+    let cancelled = false;
+    setLoading(true);
+    setLoadError(null);
+    customersApi
+      .list()
+      .then((data) => {
+        if (!cancelled) setAllCustomers(data);
+      })
+      .catch((err) => {
+        if (!cancelled) setLoadError(describeError(err));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
       });
-      // Adres opsiyonel — sadece AddressLine doldurulduysa CustomerAddress
-      // yaratilir, default isaretlenir. Sonraki cagrilarda otomatik secilir.
-      const addrLine = newAddress.addressLine.trim();
-      if (addrLine.length > 0) {
-        try {
-          await customersApi.addAddress(created.id, {
-            label: "Ev",
-            addressLine: addrLine,
-            district: newAddress.district.trim() || null,
-            notes: null,
-            isDefault: true,
-          });
-        } catch (addrErr) {
-          // Adres yaratma fail ederse muhsteri yine yarali kalir; sadece uyari.
-          // Kasiyer sonra /admin/customers'tan veya delivery sayfasinda elle
-          // yazabilir. Submit'i bloke etme.
-          console.warn("Address create failed", addrErr);
-        }
-      }
-      onChange({ id: created.id, name: created.name, phone: created.phone });
-      setCreating(false);
-      setQuery("");
-      setResults([]);
-      setOpen(false);
-    } catch (err) {
-      setCreateError(describeError(err));
-    } finally {
-      setCreateBusy(false);
-    }
+    return () => {
+      cancelled = true;
+    };
+  }, [value]);
+
+  // Client-side filter: 100 müşteriye kadar ölçek için yeterli (backend Take=100).
+  const filtered = useMemo(() => {
+    const term = query.trim().toLowerCase();
+    if (!term) return allCustomers;
+    return allCustomers.filter(
+      (c) =>
+        c.name.toLowerCase().includes(term) ||
+        c.phone.toLowerCase().includes(term)
+    );
+  }, [allCustomers, query]);
+
+  const handleSelect = (c: CustomerListItemDto) => {
+    onChange({ id: c.id, name: c.name, phone: c.phone });
+  };
+
+  const handleCreated = (newCustomer: SelectedCustomer) => {
+    // Liste'ye baş'a ekle (recent-first sıralama ile uyumlu).
+    setAllCustomers((prev) => [
+      {
+        id: newCustomer.id,
+        name: newCustomer.name,
+        phone: newCustomer.phone,
+        isActive: true,
+        orderCount: 0,
+        lastOrderAt: null,
+      },
+      ...prev,
+    ]);
+    onChange(newCustomer);
+    setDialogOpen(false);
   };
 
   if (value) {
     return (
-      <div className="flex items-center justify-between rounded-xl border border-orange-300 bg-orange-50 px-3 py-2 dark:border-orange-700 dark:bg-orange-950/40">
+      <div className="flex items-center justify-between rounded-xl border border-orange-300 bg-orange-50 px-4 py-3 dark:border-orange-700 dark:bg-orange-950/40">
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold">{value.name}</p>
-          <p className="truncate text-xs text-zinc-500">{value.phone}</p>
+          <p className="truncate text-base font-semibold">{value.name}</p>
+          <p className="truncate text-sm text-zinc-500 font-mono">
+            {formatPhoneForDisplay(value.phone)}
+          </p>
         </div>
-        <button
+        <Button
           type="button"
-          onClick={clear}
+          variant="ghost"
+          size="sm"
+          onClick={() => onChange(null)}
           disabled={disabled}
-          className="ml-2 rounded-lg px-2 py-1 text-xs font-medium text-zinc-500 hover:bg-zinc-100 disabled:opacity-50 dark:hover:bg-zinc-800"
         >
+          <X className="mr-1 h-4 w-4" />
           Değiştir
-        </button>
+        </Button>
       </div>
     );
   }
 
   return (
-    <div ref={wrapperRef} className="relative">
-      <input
-        type="search"
-        value={query}
-        onChange={(e) => {
-          setQuery(e.target.value);
-          setOpen(true);
-        }}
-        onFocus={() => setOpen(true)}
-        disabled={disabled}
-        placeholder="Telefon veya isim ara…"
-        className="h-11 w-full rounded-xl border border-zinc-300 bg-white px-3 text-base outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900"
-        autoComplete="off"
-      />
+    <>
+      <div className="space-y-3">
+        <div className="flex items-stretch gap-2">
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              disabled={disabled}
+              placeholder="Telefon veya isim ile süz..."
+              className="h-11 w-full rounded-xl border border-zinc-300 bg-white pl-9 pr-3 text-base outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 dark:border-zinc-700 dark:bg-zinc-900"
+              autoComplete="off"
+            />
+          </div>
+          {!hideCreate && (
+            <Button
+              type="button"
+              size="lg"
+              onClick={() => setDialogOpen(true)}
+              disabled={disabled}
+              className="h-11 shrink-0"
+            >
+              <Plus className="mr-1 h-4 w-4" />
+              Yeni Müşteri
+            </Button>
+          )}
+        </div>
 
-      {open && (
-        <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-64 overflow-auto rounded-xl border border-zinc-200 bg-white shadow-lg dark:border-zinc-800 dark:bg-zinc-900">
-          {error && (
-            <p className="p-2 text-xs text-red-600 dark:text-red-400">
-              {error}
-            </p>
-          )}
-          {query.trim().length < 3 && !creating && (
-            <p className="p-3 text-xs text-zinc-500">
-              Aramaya başlamak için en az 3 karakter gir.
-            </p>
-          )}
-          {query.trim().length >= 3 && searching && (
-            <p className="p-3 text-xs text-zinc-500">Aranıyor…</p>
-          )}
-          {query.trim().length >= 3 && !searching && results.length === 0 && (
-            <p className="p-3 text-xs text-zinc-500">Eşleşen müşteri yok.</p>
-          )}
-          {results.length > 0 && (
+        {loadError && (
+          <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+            Müşteri listesi yüklenemedi: {loadError}
+          </div>
+        )}
+
+        <div className="max-h-[26rem] overflow-y-auto rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+          {loading ? (
+            <div className="space-y-2 p-3">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <Skeleton key={i} className="h-14 rounded-lg" />
+              ))}
+            </div>
+          ) : filtered.length === 0 ? (
+            query.trim() ? (
+              <EmptyState
+                icon={Search}
+                title="Eşleşen müşteri yok"
+                description={`"${query}" için kayıtlı müşteri bulunamadı. Yeni müşteri ekleyebilirsin.`}
+              />
+            ) : (
+              <EmptyState
+                icon={Users}
+                title="Henüz müşteri yok"
+                description='Sağ üstteki "Yeni Müşteri" butonu ile ilk kaydı oluştur.'
+              />
+            )
+          ) : (
             <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
-              {results.map((c) => (
+              {filtered.map((c) => (
                 <li key={c.id}>
                   <button
                     type="button"
-                    onClick={() => select(c)}
-                    className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-orange-50 dark:hover:bg-orange-950/30"
+                    disabled={disabled}
+                    onClick={() => handleSelect(c)}
+                    className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-orange-50 disabled:opacity-50 dark:hover:bg-orange-950/30"
                   >
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">{c.name}</p>
-                      <p className="truncate text-xs text-zinc-500">
-                        {c.phone}
+                      <p className="truncate text-base font-medium">{c.name}</p>
+                      <p className="truncate text-sm text-zinc-500 font-mono">
+                        {formatPhoneForDisplay(c.phone)}
                       </p>
                     </div>
-                    <span className="whitespace-nowrap text-[10px] uppercase tracking-wide text-zinc-400">
-                      {c.orderCount} sipariş
-                    </span>
+                    <div className="shrink-0 text-right">
+                      <p className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                        {c.orderCount} sipariş
+                      </p>
+                    </div>
                   </button>
                 </li>
               ))}
             </ul>
           )}
-          {!hideCreate && !creating && (
-            <button
-              type="button"
-              onClick={startCreate}
-              className="block w-full border-t border-zinc-100 px-3 py-2 text-left text-sm font-semibold text-orange-600 hover:bg-orange-50 dark:border-zinc-800 dark:text-orange-400 dark:hover:bg-orange-950/30"
-            >
-              + Yeni Müşteri
-            </button>
-          )}
-          {creating && (
-            <div className="space-y-2 border-t border-zinc-100 p-3 dark:border-zinc-800">
-              {createError && (
-                <p className="rounded-lg bg-red-50 p-2 text-xs text-red-700 dark:bg-red-950/30 dark:text-red-300">
-                  {createError}
-                </p>
-              )}
-              <input
-                type="text"
-                value={newDraft.name}
-                onChange={(e) =>
-                  setNewDraft({ ...newDraft, name: e.target.value })
-                }
-                placeholder="Ad Soyad"
-                className="h-10 w-full rounded-lg border border-zinc-300 bg-white px-2.5 text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 dark:border-zinc-700 dark:bg-zinc-950"
-              />
-              <input
-                type="tel"
-                value={newDraft.phone}
-                onChange={(e) =>
-                  setNewDraft({ ...newDraft, phone: e.target.value })
-                }
-                placeholder="Telefon"
-                className="h-10 w-full rounded-lg border border-zinc-300 bg-white px-2.5 text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 dark:border-zinc-700 dark:bg-zinc-950"
-              />
-              <textarea
-                value={newAddress.addressLine}
-                onChange={(e) =>
-                  setNewAddress({ ...newAddress, addressLine: e.target.value })
-                }
-                placeholder="Adres (opsiyonel — boş bırakırsan sipariş ekranında yazarsın)"
-                rows={2}
-                className="w-full rounded-lg border border-zinc-300 bg-white p-2 text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 dark:border-zinc-700 dark:bg-zinc-950"
-              />
-              <input
-                type="text"
-                value={newAddress.district}
-                onChange={(e) =>
-                  setNewAddress({ ...newAddress, district: e.target.value })
-                }
-                placeholder="Mahalle / Semt (opsiyonel)"
-                className="h-10 w-full rounded-lg border border-zinc-300 bg-white px-2.5 text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 dark:border-zinc-700 dark:bg-zinc-950"
-              />
-              <textarea
-                value={newDraft.notes ?? ""}
-                onChange={(e) =>
-                  setNewDraft({
-                    ...newDraft,
-                    notes: e.target.value || null,
-                  })
-                }
-                placeholder="Müşteri notu (opsiyonel)"
-                rows={2}
-                className="w-full rounded-lg border border-zinc-300 bg-white p-2 text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 dark:border-zinc-700 dark:bg-zinc-950"
-              />
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setCreating(false)}
-                  disabled={createBusy}
-                  className="flex-1 rounded-lg border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                >
-                  Vazgeç
-                </button>
-                <button
-                  type="button"
-                  onClick={submitCreate}
-                  disabled={createBusy}
-                  className="flex-1 rounded-lg bg-orange-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-orange-700 disabled:bg-orange-400"
-                >
-                  {createBusy ? "Kaydediliyor…" : "Müşteri Oluştur"}
-                </button>
-              </div>
+        </div>
+      </div>
+
+      {dialogOpen && (
+        <NewCustomerDialog
+          initialPhone={
+            /^[0-9 +()-]+$/.test(query.trim()) ? query.trim() : ""
+          }
+          onClose={() => setDialogOpen(false)}
+          onCreated={handleCreated}
+        />
+      )}
+    </>
+  );
+}
+
+/**
+ * Tam alan modal — Ad + Telefon (zorunlu) + Adres + Mahalle + Not (opsiyonel).
+ * Müşteri oluşturulduktan sonra opsiyonel adres CustomerAddress'e default=true
+ * olarak kaydedilir (zincirleme istek; adres fail olsa bile müşteri yaratıldı).
+ */
+function NewCustomerDialog({
+  initialPhone,
+  onClose,
+  onCreated,
+}: {
+  initialPhone: string;
+  onClose: () => void;
+  onCreated: (c: SelectedCustomer) => void;
+}) {
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState(initialPhone);
+  const [addressLine, setAddressLine] = useState("");
+  const [district, setDistrict] = useState("");
+  const [notes, setNotes] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const canSubmit = name.trim().length > 0 && phone.trim().length > 0 && !busy;
+
+  const submit = async () => {
+    if (!canSubmit) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const created = await customersApi.create({
+        name: name.trim(),
+        phone: phone.trim(),
+        notes: notes.trim() || null,
+      });
+      // Adres opsiyonel
+      const trimmedAddr = addressLine.trim();
+      if (trimmedAddr.length > 0) {
+        try {
+          await customersApi.addAddress(created.id, {
+            label: "Ev",
+            addressLine: trimmedAddr,
+            district: district.trim() || null,
+            notes: null,
+            isDefault: true,
+          });
+        } catch (addrErr) {
+          // Adres fail → müşteri yine kaydedildi, devam et.
+          console.warn("İlk adres yaratılamadı, müşteri kaydı yine başarılı.", addrErr);
+        }
+      }
+      onCreated({ id: created.id, name: created.name, phone: created.phone });
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setError(err.detail || err.message);
+      } else {
+        setError(String(err));
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !busy) onClose();
+      }}
+    >
+      <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl dark:bg-zinc-900">
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-lg font-semibold">Yeni Müşteri</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className="rounded-md p-1 text-zinc-500 hover:bg-zinc-100 disabled:opacity-50 dark:hover:bg-zinc-800"
+            aria-label="Kapat"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="space-y-3">
+          <Field label="Ad Soyad *">
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Ahmet Yılmaz"
+              className="h-11 w-full rounded-lg border border-zinc-300 bg-white px-3 text-base outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+              autoFocus
+            />
+          </Field>
+
+          <Field label="Telefon *">
+            <input
+              type="tel"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="0532 123 45 67"
+              className="h-11 w-full rounded-lg border border-zinc-300 bg-white px-3 text-base font-mono outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+            />
+          </Field>
+
+          <Field label="Adres (opsiyonel)">
+            <textarea
+              value={addressLine}
+              onChange={(e) => setAddressLine(e.target.value)}
+              placeholder="Örn: Atatürk Cad. 12, Daire 4"
+              rows={2}
+              className="w-full rounded-lg border border-zinc-300 bg-white p-3 text-base outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+            />
+          </Field>
+
+          <Field label="Mahalle / Semt (opsiyonel)">
+            <input
+              type="text"
+              value={district}
+              onChange={(e) => setDistrict(e.target.value)}
+              placeholder="Örn: Bahçelievler"
+              className="h-11 w-full rounded-lg border border-zinc-300 bg-white px-3 text-base outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+            />
+          </Field>
+
+          <Field label="Not (opsiyonel)">
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Müşteri tercihleri, alerji vb."
+              rows={2}
+              className="w-full rounded-lg border border-zinc-300 bg-white p-3 text-base outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+            />
+          </Field>
+
+          {error && (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-2.5 text-sm text-destructive">
+              {error}
             </div>
           )}
         </div>
-      )}
+
+        <div className="mt-5 flex gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            className="flex-1"
+            onClick={onClose}
+            disabled={busy}
+          >
+            Vazgeç
+          </Button>
+          <Button
+            type="button"
+            className="flex-1"
+            onClick={submit}
+            disabled={!canSubmit}
+          >
+            {busy ? "Kaydediliyor..." : "Müşteri Oluştur"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <label className="text-sm font-medium">{label}</label>
+      {children}
     </div>
   );
 }
