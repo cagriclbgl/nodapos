@@ -22,6 +22,7 @@ public class OrderService : IOrderService
     public async Task<IReadOnlyList<OrderDto>> ListAsync(
         OrderStatus? status,
         Guid? tableId,
+        OrderType? orderType,
         DateTime? from,
         DateTime? to,
         CancellationToken ct = default)
@@ -34,6 +35,7 @@ public class OrderService : IOrderService
 
         if (status.HasValue) query = query.Where(o => o.Status == status.Value);
         if (tableId.HasValue) query = query.Where(o => o.TableId == tableId.Value);
+        if (orderType.HasValue) query = query.Where(o => o.OrderType == orderType.Value);
         if (from.HasValue) query = query.Where(o => o.CreatedAt >= from.Value);
         if (to.HasValue) query = query.Where(o => o.CreatedAt <= to.Value);
 

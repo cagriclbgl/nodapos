@@ -19,10 +19,11 @@ public class OrdersController : TenantControllerBase
     public async Task<ActionResult<IReadOnlyList<OrderDto>>> List(
         [FromQuery] OrderStatus? status,
         [FromQuery] Guid? tableId,
+        [FromQuery] OrderType? orderType,
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
         CancellationToken ct)
-        => Ok(await _service.ListAsync(status, tableId, from, to, ct));
+        => Ok(await _service.ListAsync(status, tableId, orderType, from, to, ct));
 
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<OrderDto>> Get(Guid id, CancellationToken ct)

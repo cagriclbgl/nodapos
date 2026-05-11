@@ -8,6 +8,7 @@ public interface IOrderService
     Task<IReadOnlyList<OrderDto>> ListAsync(
         OrderStatus? status,
         Guid? tableId,
+        OrderType? orderType,
         DateTime? from,
         DateTime? to,
         CancellationToken ct = default);

@@ -219,12 +219,33 @@ export const combos = {
  * bir OrderItem yaratıp Notes alanına seçim özetini yazar.
  */
 export const orders = {
+  list: (params?: {
+    status?: string;
+    tableId?: string;
+    orderType?: string;
+    from?: string;
+    to?: string;
+  }) => {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.set("status", params.status);
+    if (params?.tableId) qs.set("tableId", params.tableId);
+    if (params?.orderType) qs.set("orderType", params.orderType);
+    if (params?.from) qs.set("from", params.from);
+    if (params?.to) qs.set("to", params.to);
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return api.get<OrderDto[]>(`/api/orders${suffix}`);
+  },
   get: (id: string) => api.get<OrderDto>(`/api/orders/${id}`),
   addCombo: (orderId: string, req: AddComboToOrderRequest) =>
     api.post<OrderDto>(`/api/orders/${orderId}/combos`, req),
   /** Masasız (paket / kurye) sipariş yaratır. Caller ID akışı ve "Paket" sekmesi kullanır. */
   createDelivery: (req: CreateDeliveryOrderRequest) =>
     api.post<OrderDto>("/api/orders/delivery", req),
+  /** Delivery fulfillment transition (Hazırlanıyor → Yolda → Teslim Edildi). */
+  updateFulfillment: (
+    orderId: string,
+    req: { status: string; courierUserId?: string | null }
+  ) => api.patch<OrderDto>(`/api/orders/${orderId}/fulfillment`, req),
 };
 
 /**
