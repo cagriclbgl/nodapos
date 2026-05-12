@@ -266,31 +266,53 @@ var app = builder.Build();
         // seed sorgusunda "no such table: supervisors" ile API coker.
         await schemaDb.Database.EnsureCreatedAsync();
 
-        // Combo schema breaking change (slot→product, v0.1.7): eski kurulumda
-        // combo_items eski slot-based kolonlarla durur, EnsureCreated zaten var
-        // sandigi icin guncellemez. DROP+CREATE idempotent migration; fresh
-        // install'da da zararsiz (ayni semayla yeniden yaratir). Combo data
-        // cloud-only, pull worker tazeleyecek.
-        await schemaDb.Database.ExecuteSqlRawAsync("""
-            DROP TABLE IF EXISTS combo_items;
-            CREATE TABLE combo_items (
-                Id TEXT NOT NULL PRIMARY KEY,
-                StoreId TEXT NOT NULL,
-                ComboId TEXT NOT NULL,
-                ProductId TEXT NOT NULL,
-                Quantity INTEGER NOT NULL,
-                DisplayOrder INTEGER NOT NULL,
-                CreatedAt TEXT NOT NULL,
-                UpdatedAt TEXT NULL,
-                FOREIGN KEY (StoreId) REFERENCES stores(Id) ON DELETE RESTRICT,
-                FOREIGN KEY (ComboId) REFERENCES combos(Id) ON DELETE CASCADE,
-                FOREIGN KEY (ProductId) REFERENCES products(Id) ON DELETE RESTRICT
-            );
-            CREATE INDEX IF NOT EXISTS IX_combo_items_StoreId_ComboId
-                ON combo_items (StoreId, ComboId);
-            CREATE INDEX IF NOT EXISTS IX_combo_items_StoreId_ProductId
-                ON combo_items (StoreId, ProductId);
-            """);
+        // Combo schema breaking change (slot→product, v0.1.7): pre-v0.1.7
+        // kurulumda combo_items eski slot-based (Label/CategoryId) kolonlarla
+        // durur, EnsureCreated zaten var sandigi icin guncellemez. DROP+CREATE
+        // gerekli. v0.1.7 sonrasi schema dogru (ProductId kolonu var) — DROP
+        // yapsak kullanicinin lokal olusturdugu combo_items kayitlari her
+        // restartta SILINIR. Bu yuzden SADECE eski sema tespit edildiginde
+        // recreate yap; modern sema varsa veya tablo henuz yoksa skip.
+        var hasProductIdColumn = false;
+        try
+        {
+            var conn = schemaDb.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText =
+                "SELECT COUNT(*) FROM pragma_table_info('combo_items') WHERE name = 'ProductId';";
+            var result = await cmd.ExecuteScalarAsync();
+            hasProductIdColumn = Convert.ToInt32(result) > 0;
+        }
+        catch
+        {
+            // tablo yok veya pragma çalışmadı — recreate güvenli yol.
+        }
+
+        if (!hasProductIdColumn)
+        {
+            await schemaDb.Database.ExecuteSqlRawAsync("""
+                DROP TABLE IF EXISTS combo_items;
+                CREATE TABLE combo_items (
+                    Id TEXT NOT NULL PRIMARY KEY,
+                    StoreId TEXT NOT NULL,
+                    ComboId TEXT NOT NULL,
+                    ProductId TEXT NOT NULL,
+                    Quantity INTEGER NOT NULL,
+                    DisplayOrder INTEGER NOT NULL,
+                    CreatedAt TEXT NOT NULL,
+                    UpdatedAt TEXT NULL,
+                    FOREIGN KEY (StoreId) REFERENCES stores(Id) ON DELETE RESTRICT,
+                    FOREIGN KEY (ComboId) REFERENCES combos(Id) ON DELETE CASCADE,
+                    FOREIGN KEY (ProductId) REFERENCES products(Id) ON DELETE RESTRICT
+                );
+                CREATE INDEX IF NOT EXISTS IX_combo_items_StoreId_ComboId
+                    ON combo_items (StoreId, ComboId);
+                CREATE INDEX IF NOT EXISTS IX_combo_items_StoreId_ProductId
+                    ON combo_items (StoreId, ProductId);
+                """);
+        }
 
         // Idempotent ADD COLUMN — EnsureCreated mevcut tablolara yeni kolon
         // EKLEMEZ. Upgrade akışında bu satırlar olmadan v0.1.9'a güncellenen
