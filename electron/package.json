@@ -1,6 +1,6 @@
 {
   "name": "pizzapos-desktop",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "description": "NodaPos offline-first desktop shell — wraps the .NET backend (SQLite) and the Next.js frontend in a single Electron window.",
   "main": "dist/main.js",
   "scripts": {

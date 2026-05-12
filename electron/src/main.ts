@@ -262,20 +262,47 @@ function startCallerIdListener(apiPort: number): void {
  * Sayfa ?silent=1 query'sini görür ve kendi auto window.print() çağrısını
  * ATLAR — yoksa çift baskı tetiklenir.
  */
+function getPrinterConfig(): { paperWidthMm: number; paperHeightMm: number; useDialog: boolean } {
+  // Kasa-lokal yazıcı ayarı (userData/printer.json). Yoksa default 80mm rulo.
+  // useDialog=true ise silent baskı yerine Windows yazıcı dialog'u açar
+  // (eski davranış — sürücüsü düzgün set edilmemiş yazıcılarda kurtarıcı).
+  try {
+    const file = path.join(app.getPath("userData"), "printer.json");
+    if (fs.existsSync(file)) {
+      const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+      return {
+        paperWidthMm: Number(parsed.paperWidthMm) || 80,
+        paperHeightMm: Number(parsed.paperHeightMm) || 297,
+        useDialog: parsed.useDialog === true,
+      };
+    }
+  } catch (err) {
+    log(`[print] config read error (using defaults): ${(err as Error).message}`);
+  }
+  return { paperWidthMm: 80, paperHeightMm: 297, useDialog: false };
+}
+
 function registerPrinterIpc(): void {
   ipcMain.handle(
     "printer:print",
     async (_e, opts: { url: string; deviceName?: string }) => {
+      const cfg = getPrinterConfig();
       const path = opts.url.startsWith("/") ? opts.url : `/${opts.url}`;
       const sep = path.includes("?") ? "&" : "?";
-      const full = `http://127.0.0.1:${activeFrontendPort}${path}${sep}silent=1`;
-      log(`[print] silent print → ${full}`);
+      // useDialog=true ise sayfa ?silent=1 görmesin (otomatik window.print()
+      // çalışsın, sistem yazıcı dialog'u kasiyere açılsın). Aksi halde silent.
+      const full = cfg.useDialog
+        ? `http://127.0.0.1:${activeFrontendPort}${path}`
+        : `http://127.0.0.1:${activeFrontendPort}${path}${sep}silent=1`;
+      log(`[print] ${cfg.useDialog ? "dialog" : "silent"} print → ${full} (${cfg.paperWidthMm}x${cfg.paperHeightMm}mm)`);
 
+      // Dialog moduna düştüğünde hidden window'da yine yükle ama
+      // webContents.print({silent: false}) ile Windows yazıcı dialog'u açılsın.
+      // Bu eski (v0.1.9 öncesi) davranışın aynısı — yazıcı sürücüsü düzgün set
+      // edilmemiş ortamlarda kurtarıcı.
       const win = new BrowserWindow({
-        show: false,
+        show: cfg.useDialog,
         webPreferences: {
-          // Print preview için node entegrasyonuna gerek yok; ana penceredeki
-          // preload da yüklenmesin (yazıcı sayfası min izinli olsun).
           contextIsolation: true,
           nodeIntegration: false,
           sandbox: true,
@@ -284,13 +311,7 @@ function registerPrinterIpc(): void {
 
       try {
         await win.loadURL(full);
-        // SPA fetch + render'i bekle. did-finish-load HTML yüklendiginde
-        // firar; React tree mount + api.get(...) + setState async devam
-        // ediyor — sabit timeout'la bekleyince "Yükleniyor…" gri text
-        // basılıp 1cm bos kagit çıkıyordu. Yeni protokol: print view'ı
-        // datasi gelince window.__printReady = true set ediyor, biz onu
-        // polluyoruz. Max 8sn — sonrasi ya error ya geri-uyumluluk icin
-        // best-effort baski (eski view'lar ready flag set etmeyebilir).
+        // window.__printReady polling — fetch + render bitsin diye.
         const ready = await win.webContents.executeJavaScript(`
           new Promise((resolve) => {
             if (window.__printReady === true) { resolve(true); return; }
@@ -308,26 +329,39 @@ function registerPrinterIpc(): void {
         `).catch(() => false);
 
         if (!ready) {
-          log("[print] WARN: __printReady not set within 8s — printing anyway (content may be loading state)");
+          log("[print] WARN: __printReady not set within 8s — printing anyway");
         }
-
-        // Ready flag set olsa bile DOM/style/layout son frame'i otursun
-        // diye küçük bir nefes ver.
         await new Promise((r) => setTimeout(r, 200));
 
+        // Termal yazıcı kritik fix: pageSize'ı 80mm rulo boyutuna sabitle.
+        // Default A4 ise yazıcı sürücüsü A4 sayfayı 80mm rulosuna sığdıramayıp
+        // 1cm besleyip durur, kağıt bos cikar. Microns (1mm = 1000μ).
+        // useDialog=true ise silent=false yapıp Windows yazıcı dialog'unu aç —
+        // kullanıcı manuel "Yazdır" basar, kurtarıcı flow.
         return await new Promise<{ ok: boolean; reason?: string }>((resolve) => {
           win.webContents.print(
             {
-              silent: true,
+              silent: !cfg.useDialog,
               deviceName: opts.deviceName || undefined,
               margins: { marginType: "none" },
-              printBackground: false,
+              printBackground: true,
+              pageSize: {
+                width: cfg.paperWidthMm * 1000,
+                height: cfg.paperHeightMm * 1000,
+              },
+              scaleFactor: 100,
+              copies: 1,
             },
             (success, errorType) => {
               if (!success) log(`[print] failed: ${errorType}`);
               resolve({ ok: success, reason: success ? undefined : errorType });
               try {
-                win.close();
+                // Dialog modunda window'u kapatmadan önce kullanıcıya zaman
+                // tanı — print job sıraya girdikten sonra kapansa da OK ama
+                // bazı sürücüler hala referans tutar.
+                setTimeout(() => {
+                  try { win.close(); } catch { /* ignore */ }
+                }, cfg.useDialog ? 5000 : 0);
               } catch {
                 /* ignore */
               }
