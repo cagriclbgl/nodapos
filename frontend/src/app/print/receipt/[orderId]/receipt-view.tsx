@@ -110,7 +110,7 @@ export function ReceiptView({ orderId }: Props) {
   })();
 
   return (
-    <div className="mx-auto max-w-[320px] px-3 py-4 font-mono text-[12px] leading-snug text-black print:px-0 print:py-2">
+    <div className="mx-auto max-w-[270px] px-3 py-4 font-mono text-[12px] leading-snug text-black print:px-0 print:py-2 print:max-w-none print:w-[72mm]">
       {/* Toolbar — hidden in print output */}
       <div className="mb-4 flex items-center justify-between gap-2 print:hidden">
         <Link

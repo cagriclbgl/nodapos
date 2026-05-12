@@ -92,7 +92,7 @@ export function CourierSlipView({ orderId }: Props) {
   const cashOnDelivery = order.payments.length === 0; // henüz ödeme alınmamış
 
   return (
-    <div className="mx-auto max-w-[300px] p-4 font-mono text-sm">
+    <div className="mx-auto max-w-[270px] p-4 font-mono text-sm print:p-0 print:max-w-none print:w-[72mm]">
       <header className="mb-3 text-center">
         <p className="text-base font-bold">{store?.name ?? ""}</p>
         <p className="text-xs">KURYE ADİSYONU</p>

@@ -263,23 +263,24 @@ function startCallerIdListener(apiPort: number): void {
  * ATLAR — yoksa çift baskı tetiklenir.
  */
 function getPrinterConfig(): { paperWidthMm: number; paperHeightMm: number; useDialog: boolean } {
-  // Kasa-lokal yazıcı ayarı (userData/printer.json). Yoksa default 80mm rulo.
-  // useDialog=true ise silent baskı yerine Windows yazıcı dialog'u açar
-  // (eski davranış — sürücüsü düzgün set edilmemiş yazıcılarda kurtarıcı).
+  // Default: Rongta RP80 — 80mm kağıt, 72.1mm baskı alanı, 210mm sayfa.
+  // pageSize'a 80 verilirse driver kendi 4mm sol/sağ margin'i uygulayıp
+  // 72.1mm printable kullanır. useDialog=true ise Windows yazıcı dialog'u
+  // açılır (eski davranış — sürücüsü düzgün set edilmemiş yazıcılarda).
   try {
     const file = path.join(app.getPath("userData"), "printer.json");
     if (fs.existsSync(file)) {
       const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
       return {
         paperWidthMm: Number(parsed.paperWidthMm) || 80,
-        paperHeightMm: Number(parsed.paperHeightMm) || 297,
+        paperHeightMm: Number(parsed.paperHeightMm) || 210,
         useDialog: parsed.useDialog === true,
       };
     }
   } catch (err) {
     log(`[print] config read error (using defaults): ${(err as Error).message}`);
   }
-  return { paperWidthMm: 80, paperHeightMm: 297, useDialog: false };
+  return { paperWidthMm: 80, paperHeightMm: 210, useDialog: false };
 }
 
 function registerPrinterIpc(): void {
