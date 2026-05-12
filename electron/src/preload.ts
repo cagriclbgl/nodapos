@@ -23,6 +23,19 @@ const CHANNELS = {
   SET_TEST_MODE: "caller-id:set-test-mode",
 } as const;
 
+/**
+ * Termal yazıcıya sessizce basma — main process hidden BrowserWindow açar,
+ * URL'yi yükler, webContents.print({ silent: true }) çağırır, sonra kapatır.
+ *   - print(url, deviceName?): renderer "şu sayfayı yazdır" der; ana
+ *     pencereye etkisi yok. deviceName boş ise sistem varsayılan yazıcısı.
+ *   - listPrinters(): mevcut yazıcı listesi (settings ekranı için).
+ */
+contextBridge.exposeInMainWorld("printer", {
+  print: (url: string, deviceName?: string) =>
+    ipcRenderer.invoke("printer:print", { url, deviceName }),
+  listPrinters: () => ipcRenderer.invoke("printer:list"),
+});
+
 contextBridge.exposeInMainWorld("callerId", {
   onCall: (cb: (payload: unknown) => void) => {
     const handler = (_e: unknown, payload: unknown) => cb(payload);

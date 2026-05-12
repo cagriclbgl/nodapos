@@ -14,10 +14,6 @@ import { Badge } from "@/components/ui-v2/badge";
 import { Skeleton } from "@/components/ui-v2/skeleton";
 import { cn } from "@/lib/utils";
 import { OptionsDialog } from "@/app/pos/table/[id]/options-dialog";
-import {
-  ComboOptionsDialog,
-  comboNeedsVariants,
-} from "@/app/pos/table/[id]/combo-options-dialog";
 import type {
   AddComboToOrderRequest,
   AddOrderItemRequest,
@@ -70,8 +66,6 @@ type CartLine =
       quantity: number;
       /** Notlar — combo içeriği özeti (UI gösterimi için). */
       summary: string;
-      /** comboItemId → seçilen ProductOption id listesi (backend payload). */
-      itemOptionSelections?: Record<string, string[]>;
       lineTotal: number;
     };
 
@@ -104,7 +98,6 @@ export function DeliveryOrderScreen({
   const [notes, setNotes] = useState("");
 
   const [pendingProduct, setPendingProduct] = useState<ProductDto | null>(null);
-  const [pendingCombo, setPendingCombo] = useState<ComboDto | null>(null);
   const [bootError, setBootError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -311,28 +304,16 @@ export function DeliveryOrderScreen({
   };
 
   /**
-   * Kasiyer kampanyaya tıkladığında — varyantı olan ürünler varsa
-   * ComboOptionsDialog açılır, yoksa direkt sepete eklenir.
+   * Kasiyer kampanyaya basar basmaz sepete eklenir — varyant/dialog yok.
+   * Notes özeti combo'nun ürün listesinden çıkarılır, adisyonda "Kampanya
+   * Adı" + içerik görünür.
    */
   const onComboClick = (combo: ComboDto) => {
     if (combo.items.length === 0) {
       setActionError("Bu kampanyada ürün yok.");
       return;
     }
-    if (comboNeedsVariants(combo, products)) {
-      setPendingCombo(combo);
-      return;
-    }
-    pushComboToCart(combo, {});
-  };
-
-  const pushComboToCart = (
-    combo: ComboDto,
-    itemOptionSelections: Record<string, string[]>
-  ) => {
     const unit = effComboPrice(combo);
-
-    // Notes özeti — backend'in AddComboAsync ürettiği formatla aynı.
     const productById = new Map(products.map((p) => [p.id, p]));
     const summaryParts = combo.items
       .slice()
@@ -340,18 +321,7 @@ export function DeliveryOrderScreen({
       .map((ci) => {
         const productName =
           productById.get(ci.productId)?.name ?? ci.productName;
-        let part = `${ci.quantity}x ${productName}`;
-        const chosen = itemOptionSelections[ci.id];
-        if (chosen && chosen.length > 0) {
-          const product = productById.get(ci.productId);
-          const matched = product?.options
-            .filter((o) => chosen.includes(o.id) && o.isActive)
-            .sort((a, b) => a.displayOrder - b.displayOrder)
-            .map((o) => o.name);
-          if (matched && matched.length > 0)
-            part += ` (${matched.join(", ")})`;
-        }
-        return part;
+        return `${ci.quantity}x ${productName}`;
       });
 
     setCart((cur) => [
@@ -364,13 +334,9 @@ export function DeliveryOrderScreen({
         unitPrice: unit,
         quantity: 1,
         summary: summaryParts.join(", "),
-        itemOptionSelections: Object.keys(itemOptionSelections).length
-          ? itemOptionSelections
-          : undefined,
         lineTotal: unit,
       },
     ]);
-    setPendingCombo(null);
   };
 
   const incrementLine = (key: string, delta: number) => {
@@ -421,7 +387,6 @@ export function DeliveryOrderScreen({
         .map((l) => ({
           comboId: l.comboId,
           quantity: l.quantity,
-          itemOptionSelections: l.itemOptionSelections,
         }));
       const req: CreateDeliveryOrderRequest = {
         orderType,
@@ -441,10 +406,17 @@ export function DeliveryOrderScreen({
         incomingCallId: callId,
       };
       const created = await ordersApi.createDelivery(req);
-      if (orderType === "Delivery") {
-        router.push(`/print/courier-slip/${created.id}`);
+      const printPath =
+        orderType === "Delivery"
+          ? `/print/courier-slip/${created.id}`
+          : `/print/receipt/${created.id}`;
+      // Kasada (Electron) sessiz baskı: yeni sekme / print önizleme yok,
+      // doğrudan termal yazıcıya basar. Kasiyer kasaya geri döner.
+      if (typeof window !== "undefined" && window.printer) {
+        void window.printer.print(printPath);
+        router.push("/pos");
       } else {
-        router.push(`/print/receipt/${created.id}`);
+        router.push(printPath);
       }
     } catch (err) {
       setActionError(describeError(err));
@@ -787,16 +759,6 @@ export function DeliveryOrderScreen({
         />
       )}
 
-      {pendingCombo && (
-        <ComboOptionsDialog
-          combo={pendingCombo}
-          products={products}
-          onClose={() => setPendingCombo(null)}
-          onConfirm={(selections) =>
-            pushComboToCart(pendingCombo, selections)
-          }
-        />
-      )}
     </div>
   );
 }

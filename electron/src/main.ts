@@ -17,6 +17,7 @@ let logStream: fs.WriteStream | null = null;
 let apiCrashCount = 0;
 let frontendCrashCount = 0;
 let callerIdListener: CallerIdListener | null = null;
+let activeFrontendPort: number = 3000;
 const MAX_CRASHES = 3;
 
 function log(msg: string) {
@@ -251,6 +252,87 @@ function startCallerIdListener(apiPort: number): void {
 }
 
 /**
+ * Termal fiş yazıcısına sessiz baskı. Renderer "şu sayfayı yazdır" der
+ * (örn. /print/end-of-day/2026-05-12 veya /print/receipt/<id>). Main process
+ * hidden BrowserWindow açar, URL'yi yükler, layout otursun diye kısa bekler,
+ * sonra webContents.print({ silent: true, deviceName? }) — yazıcı seçim
+ * diyalogu çıkmaz, doğrudan basar. deviceName verilmezse Windows varsayılan
+ * yazıcısı kullanılır.
+ *
+ * Sayfa ?silent=1 query'sini görür ve kendi auto window.print() çağrısını
+ * ATLAR — yoksa çift baskı tetiklenir.
+ */
+function registerPrinterIpc(): void {
+  ipcMain.handle(
+    "printer:print",
+    async (_e, opts: { url: string; deviceName?: string }) => {
+      const path = opts.url.startsWith("/") ? opts.url : `/${opts.url}`;
+      const sep = path.includes("?") ? "&" : "?";
+      const full = `http://127.0.0.1:${activeFrontendPort}${path}${sep}silent=1`;
+      log(`[print] silent print → ${full}`);
+
+      const win = new BrowserWindow({
+        show: false,
+        webPreferences: {
+          // Print preview için node entegrasyonuna gerek yok; ana penceredeki
+          // preload da yüklenmesin (yazıcı sayfası min izinli olsun).
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true,
+        },
+      });
+
+      try {
+        await win.loadURL(full);
+        // 1500ms — sayfa client-side fetch yapıp datayı render etsin.
+        // Daily summary aggregate olduğu için biraz daha uzun verdik;
+        // basit receipt için fazla ama farkı kullanıcı hissetmez.
+        await new Promise((r) => setTimeout(r, 1500));
+
+        return await new Promise<{ ok: boolean; reason?: string }>((resolve) => {
+          win.webContents.print(
+            {
+              silent: true,
+              deviceName: opts.deviceName || undefined,
+              margins: { marginType: "none" },
+              printBackground: false,
+            },
+            (success, errorType) => {
+              if (!success) log(`[print] failed: ${errorType}`);
+              resolve({ ok: success, reason: success ? undefined : errorType });
+              try {
+                win.close();
+              } catch {
+                /* ignore */
+              }
+            }
+          );
+        });
+      } catch (err) {
+        log(`[print] error: ${(err as Error).message}`);
+        try {
+          win.close();
+        } catch {
+          /* ignore */
+        }
+        return { ok: false, reason: (err as Error).message };
+      }
+    }
+  );
+
+  ipcMain.handle("printer:list", async () => {
+    if (!mainWindow) return [];
+    const list = await mainWindow.webContents.getPrintersAsync();
+    return list.map((p) => ({
+      name: p.name,
+      displayName: p.displayName,
+      isDefault: p.isDefault,
+      status: p.status,
+    }));
+  });
+}
+
+/**
  * Auto-update via electron-updater + GitHub Releases. Kasa her acilista
  * 10sn delay sonra son release'i sorar; bulursa background'da indirir,
  * uygulamayi kapatinca yukler (autoInstallOnAppQuit default true). Her
@@ -316,6 +398,7 @@ function setupAutoUpdater() {
 
 app.whenReady().then(async () => {
   ensureLog();
+  registerPrinterIpc();
   try {
     const apiPort = await startApi();
     let frontendPort = 3000;
@@ -324,6 +407,7 @@ app.whenReady().then(async () => {
     } else {
       log("Dev mode: skipping bundled frontend, expecting Next dev server on 3000.");
     }
+    activeFrontendPort = frontendPort;
     await createWindow(frontendPort);
     // Caller ID listener pencere açıldıktan SONRA — IPC broadcast'ı için.
     startCallerIdListener(apiPort);

@@ -83,3 +83,17 @@ html,
 body {
   height: 100%;
 }
+
+/* 80mm termal yazıcı için sayfa boyutu — Electron webContents.print silent
+ * modunda margins:none ile çağırılır; ek olarak browser'ın @page'i 80mm
+ * genişliğe sabitliyoruz ki kağıt boş alan bırakmasın. Tarayıcı normal
+ * sayfalarda bu kuralı zaten görmezden gelir. */
+@media print {
+  @page {
+    size: 80mm auto;
+    margin: 0;
+  }
+  body {
+    margin: 0;
+  }
+}

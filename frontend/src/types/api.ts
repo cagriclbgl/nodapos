@@ -525,3 +525,38 @@ export interface CreateDeliveryOrderRequest {
   /** Paket/Kurye siparişine eklenecek kombolar — Items'la bağımsız liste. */
   combos?: AddComboToOrderRequest[];
 }
+
+// --- Reports ---------------------------------------------------------------
+
+export type PaymentMethodKey =
+  | "Cash"
+  | "CreditCard"
+  | "DebitCard"
+  | "MealCard"
+  | "Other";
+
+export interface PaymentMethodBreakdown {
+  method: PaymentMethodKey;
+  count: number;
+  total: number;
+}
+
+export interface OrderTypeBreakdown {
+  orderType: "DineIn" | "Takeaway" | "Delivery";
+  count: number;
+  total: number;
+}
+
+export interface DailySummaryDto {
+  /** "YYYY-MM-DD" — istenen yerel takvim günü echo. */
+  date: string;
+  rangeStartUtc: string;
+  rangeEndUtc: string;
+  completedOrderCount: number;
+  cancelledOrderCount: number;
+  totalRevenue: number;
+  totalDiscount: number;
+  totalItemQuantity: number;
+  paymentBreakdown: PaymentMethodBreakdown[];
+  orderTypeBreakdown: OrderTypeBreakdown[];
+}

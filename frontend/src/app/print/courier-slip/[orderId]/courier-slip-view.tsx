@@ -51,8 +51,14 @@ export function CourierSlipView({ orderId }: Props) {
   }, [storeId, orderId]);
 
   // Veri geldikten sonra yazdır.
+  // ?silent=1 ise Electron main process webContents.print({ silent: true })
+  // çağıracak — bizim window.print()'imiz çift baskıya yol açmasın.
   useEffect(() => {
     if (!order) return;
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("silent") === "1") return;
+    }
     const t = setTimeout(() => window.print(), 200);
     return () => clearTimeout(t);
   }, [order]);

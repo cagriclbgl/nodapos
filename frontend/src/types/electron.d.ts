@@ -56,10 +56,39 @@ export interface CallerIdBridge {
   setTestMode(active: boolean): Promise<{ ok: boolean }>;
 }
 
+/**
+ * `window.printer` — Electron silent print köprüsü. Termal fiş yazıcısına
+ * yazıcı seçim diyalogu olmadan basar; web (Vercel) ortamında undefined,
+ * çağıran tarafta önce `if (window.printer)` kontrolü yapılmalı.
+ */
+export interface PrinterInfo {
+  name: string;
+  displayName?: string;
+  isDefault?: boolean;
+  status?: number;
+}
+
+export interface PrinterBridge {
+  /**
+   * Verilen URL'yi hidden BrowserWindow'da açar ve sessizce basar. URL
+   * göreceli ("/print/end-of-day/...") veya tam olabilir; her iki durumda
+   * da main process ?silent=1 query'sini ekler — sayfa kendi otomatik
+   * print çağrısını atlamalı, yoksa çift baskı olur.
+   *
+   * Çözünür ok:false döndürürse renderer fallback (window.open) yapabilir.
+   */
+  print(
+    url: string,
+    deviceName?: string
+  ): Promise<{ ok: boolean; reason?: string }>;
+  listPrinters(): Promise<PrinterInfo[]>;
+}
+
 declare global {
   interface Window {
     app?: { version: string; platform: string };
     callerId?: CallerIdBridge;
+    printer?: PrinterBridge;
   }
 }
 

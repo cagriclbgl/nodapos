@@ -32,10 +32,6 @@ import { cn } from "@/lib/utils";
 import { OptionsDialog } from "./options-dialog";
 import { PaymentDialog } from "./payment-dialog";
 import { DetailsDialog } from "./details-dialog";
-import {
-  ComboOptionsDialog,
-  comboNeedsVariants,
-} from "./combo-options-dialog";
 
 const COMBO_TAB = "__combos__";
 
@@ -63,7 +59,6 @@ export function OrderScreen({ tableId }: Props) {
   const [selectedCat, setSelectedCat] = useState<string>("");
 
   const [pendingProduct, setPendingProduct] = useState<ProductDto | null>(null);
-  const [pendingCombo, setPendingCombo] = useState<ComboDto | null>(null);
   const [showPayment, setShowPayment] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
 
@@ -201,11 +196,9 @@ export function OrderScreen({ tableId }: Props) {
   };
 
   /**
-   * Combo'yu mevcut siparişe ekler. Backend tek snapshot OrderItem yaratıyor
-   * (ProductName=combo.Name, UnitPrice=combo.Price, Notes ürün özeti).
-   * Kasiyer kampanyaya tıkladığında varyantı olan ürünler için
-   * ComboOptionsDialog açılır; seçilen opsiyonlar Notes'a "(Büyük)" gibi
-   * yansır. Hiç varyant gerekmiyorsa dialog atlanır.
+   * Combo'yu mevcut siparişe ekler. Kasiyer kampanyaya basar basmaz tek
+   * snapshot OrderItem olarak sepete iner — varyant/dialog yok. Adisyonda
+   * "Kampanya Adı" + içerik notları görünür, fiyat combo'nun sabit fiyatı.
    *
    * Aktif sipariş yoksa, combo'nun ilk ürününü seed olarak gönderip siparişi
    * açar, sonra /api/orders/{id}/combos ile combo'yu ekler ve seed kalemi
@@ -216,17 +209,10 @@ export function OrderScreen({ tableId }: Props) {
       setActionError("Bu kampanyada ürün yok.");
       return;
     }
-    if (comboNeedsVariants(combo, products)) {
-      setPendingCombo(combo);
-      return;
-    }
-    void submitCombo(combo, {});
+    void submitCombo(combo);
   };
 
-  const submitCombo = async (
-    combo: ComboDto,
-    itemOptionSelections: Record<string, string[]>
-  ) => {
+  const submitCombo = async (combo: ComboDto) => {
     if (!storeId || !table) return;
     setBusy(true);
     setActionError(null);
@@ -261,9 +247,6 @@ export function OrderScreen({ tableId }: Props) {
       const afterCombo = await ordersApi.addCombo(workingOrderId, {
         comboId: combo.id,
         quantity: 1,
-        itemOptionSelections: Object.keys(itemOptionSelections).length
-          ? itemOptionSelections
-          : undefined,
       });
 
       if (seedItemId) {
@@ -275,7 +258,6 @@ export function OrderScreen({ tableId }: Props) {
       } else {
         setOrder(afterCombo);
       }
-      setPendingCombo(null);
     } catch (err) {
       setActionError(describeError(err));
     } finally {
@@ -303,7 +285,16 @@ export function OrderScreen({ tableId }: Props) {
     setActionError(null);
     try {
       await api.post(`/api/orders/${order.id}/complete`, req, storeId);
-      router.push(`/print/receipt/${order.id}`);
+      // Kasada (Electron) sessiz baskı arka planda fırlat — kasiyer ayrı
+      // sekmede print önizleme bekleme rolünden kurtulur, doğrudan masalara
+      // döner. Web (Vercel admin) ortamında window.printer undefined →
+      // eski davranış (yeni sekmede print preview).
+      if (typeof window !== "undefined" && window.printer) {
+        void window.printer.print(`/print/receipt/${order.id}`);
+        router.push("/pos");
+      } else {
+        router.push(`/print/receipt/${order.id}`);
+      }
       router.refresh();
     } catch (err) {
       setActionError(describeError(err));
@@ -634,15 +625,6 @@ export function OrderScreen({ tableId }: Props) {
             await addLine(line);
             setPendingProduct(null);
           }}
-        />
-      )}
-
-      {pendingCombo && (
-        <ComboOptionsDialog
-          combo={pendingCombo}
-          products={products}
-          onClose={() => setPendingCombo(null)}
-          onConfirm={(selections) => submitCombo(pendingCombo, selections)}
         />
       )}
 
