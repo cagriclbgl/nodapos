@@ -59,18 +59,23 @@ export function ReceiptView({ orderId }: Props) {
     };
   }, [storeId, orderId]);
 
-  // Trigger the browser print dialog after the receipt mounts. Small delay
-  // so layout/fonts settle before printing.
-  //
-  // Silent print: Electron main process bu sayfayı hidden BrowserWindow'da
-  // ?silent=1 ile açar ve webContents.print({ silent: true }) çağırır.
-  // Otomatik browser print buradan çağrılırsa ÇİFT baskı olur — atla.
+  // Silent print: Electron main process hidden BrowserWindow'da ?silent=1
+  // ile açar, window.__printReady = true bekleyip webContents.print({ silent
+  // true }) çağırır. Bizim window.print() çift baskı yapmasın — sessiz modda
+  // sadece ready flag set edip çıkıyoruz.
   useEffect(() => {
     if (!order) return;
-    if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get("silent") === "1") return;
-    }
+    const isSilent =
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("silent") === "1";
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        (window as unknown as { __printReady?: boolean }).__printReady = true;
+      });
+    });
+
+    if (isSilent) return;
     const handle = window.setTimeout(() => {
       window.print();
     }, 200);

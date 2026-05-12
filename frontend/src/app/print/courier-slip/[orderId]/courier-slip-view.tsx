@@ -50,15 +50,22 @@ export function CourierSlipView({ orderId }: Props) {
     };
   }, [storeId, orderId]);
 
-  // Veri geldikten sonra yazdır.
-  // ?silent=1 ise Electron main process webContents.print({ silent: true })
-  // çağıracak — bizim window.print()'imiz çift baskıya yol açmasın.
+  // Silent print: main process ?silent=1 ile açar, window.__printReady = true
+  // bekleyip webContents.print({ silent: true }) çağırır. Bizim window.print()
+  // çift baskı yapmasın; sessiz modda sadece ready flag set edip çıkıyoruz.
   useEffect(() => {
     if (!order) return;
-    if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get("silent") === "1") return;
-    }
+    const isSilent =
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("silent") === "1";
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        (window as unknown as { __printReady?: boolean }).__printReady = true;
+      });
+    });
+
+    if (isSilent) return;
     const t = setTimeout(() => window.print(), 200);
     return () => clearTimeout(t);
   }, [order]);

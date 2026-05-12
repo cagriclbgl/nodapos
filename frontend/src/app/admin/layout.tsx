@@ -7,6 +7,7 @@ import {
   BarChart3,
   ChevronRight,
   ClipboardList,
+  Cloud,
   LayoutGrid,
   Package,
   Phone,
@@ -40,6 +41,7 @@ const NAV: NavItem[] = [
   { href: "/admin/calls", label: "Paket Servis", icon: Phone },
   { href: "/admin/users", label: "Kullanıcılar", icon: UserCog },
   { href: "/admin/settings/caller-id", label: "Caller ID", icon: Settings },
+  { href: "/admin/settings/sync", label: "Senkronizasyon", icon: Cloud },
 ];
 
 export default function AdminLayout({

@@ -68,12 +68,22 @@ export function EndOfDayReceiptView({ date }: Props) {
 
   // ?silent=1 ise Electron main process webContents.print({ silent: true })
   // çağıracak — bizim çağrımız çift baskıya yol açmasın.
+  // Silent modda main process window.__printReady = true bekliyor (yoksa
+  // sayfa yüklenirken "Yükleniyor…" gri text basılıp 1cm bos kagit cikiyor).
   useEffect(() => {
     if (!summary) return;
-    if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get("silent") === "1") return;
-    }
+    const isSilent =
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("silent") === "1";
+
+    // İki RAF — React commit + browser paint sonrası ready işaretle.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        (window as unknown as { __printReady?: boolean }).__printReady = true;
+      });
+    });
+
+    if (isSilent) return;
     const t = window.setTimeout(() => window.print(), 200);
     return () => window.clearTimeout(t);
   }, [summary]);

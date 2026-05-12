@@ -10,7 +10,6 @@ using PizzaPos.Api.Sync;
 namespace PizzaPos.Api.Controllers;
 
 [ApiController]
-[AllowAnonymous]
 [Route("api/sync")]
 public class SyncController : ControllerBase
 {
@@ -44,6 +43,7 @@ public class SyncController : ControllerBase
     /// events idempotently using OutboxEvent.Id as the natural primary key.
     /// </summary>
     [HttpPost("ingest")]
+    [AllowAnonymous]
     public async Task<IActionResult> Ingest(CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(_options.HmacSecret))
@@ -129,6 +129,76 @@ public class SyncController : ControllerBase
     }
 
     /// <summary>
+    /// Diagnostic snapshot: SyncWorker config + outbox queue state. Used by the
+    /// admin panel to surface why kasa → cloud delivery is stuck without
+    /// having to dig through main.log on the kasa machine.
+    /// </summary>
+    [HttpGet("status")]
+    [Authorize(Roles = "Manager")]
+    public async Task<IActionResult> Status(CancellationToken ct)
+    {
+        var pending = await _db.OutboxEvents
+            .Where(e => e.SentAt == null)
+            .CountAsync(ct);
+
+        var failing = await _db.OutboxEvents
+            .Where(e => e.SentAt == null && e.RetryCount > 0)
+            .CountAsync(ct);
+
+        var giveUp = await _db.OutboxEvents
+            .Where(e => e.SentAt == null && e.RetryCount >= 10)
+            .CountAsync(ct);
+
+        var oldestPending = await _db.OutboxEvents
+            .Where(e => e.SentAt == null)
+            .OrderBy(e => e.CreatedAt)
+            .Select(e => (DateTime?)e.CreatedAt)
+            .FirstOrDefaultAsync(ct);
+
+        var lastFailure = await _db.OutboxEvents
+            .Where(e => e.LastError != null && e.LastAttemptAt != null)
+            .OrderByDescending(e => e.LastAttemptAt)
+            .Select(e => new { e.EventType, e.LastError, e.LastAttemptAt, e.RetryCount })
+            .FirstOrDefaultAsync(ct);
+
+        var since24h = DateTime.UtcNow.AddHours(-24);
+        var sentLast24h = await _db.OutboxEvents
+            .Where(e => e.SentAt != null && e.SentAt >= since24h)
+            .CountAsync(ct);
+
+        var lastSent = await _db.OutboxEvents
+            .Where(e => e.SentAt != null)
+            .OrderByDescending(e => e.SentAt)
+            .Select(e => (DateTime?)e.SentAt)
+            .FirstOrDefaultAsync(ct);
+
+        // HmacSecret/Cloud URL'i loglayip dısa veremeyiz — sadece "kuruldu mu"
+        // bilgisi yeter. Yanlis URL durumunda kullaniciya gosterilmeli, ama
+        // secret'i panele dökmek gereksiz risk.
+        return Ok(new
+        {
+            config = new
+            {
+                enabled = _options.Enabled,
+                cloudBaseUrl = string.IsNullOrWhiteSpace(_options.CloudBaseUrl) ? null : _options.CloudBaseUrl,
+                hasHmacSecret = !string.IsNullOrWhiteSpace(_options.HmacSecret),
+                pollingSeconds = _options.PollingSeconds,
+                batchSize = _options.BatchSize,
+            },
+            outbox = new
+            {
+                pendingCount = pending,
+                failingCount = failing,
+                giveUpCount = giveUp,
+                sentLast24h,
+                oldestPendingAt = oldestPending,
+                lastSentAt = lastSent,
+                lastFailure,
+            },
+        });
+    }
+
+    /// <summary>
     /// Pull endpoint for the kasa to fetch manager-write-domain changes plus
     /// bidirectional Customer/CustomerAddress rows. Authenticated via HMAC over
     /// (path + query string) — there's no body to sign on a GET.
@@ -138,6 +208,7 @@ public class SyncController : ControllerBase
     /// kasa is the only caller and HMAC is the trust anchor.
     /// </summary>
     [HttpGet("changes")]
+    [AllowAnonymous]
     public async Task<IActionResult> Changes(
         [FromQuery] DateTime? since,
         [FromQuery] string? aggregates,

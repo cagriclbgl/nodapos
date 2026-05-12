@@ -284,10 +284,36 @@ function registerPrinterIpc(): void {
 
       try {
         await win.loadURL(full);
-        // 1500ms — sayfa client-side fetch yapıp datayı render etsin.
-        // Daily summary aggregate olduğu için biraz daha uzun verdik;
-        // basit receipt için fazla ama farkı kullanıcı hissetmez.
-        await new Promise((r) => setTimeout(r, 1500));
+        // SPA fetch + render'i bekle. did-finish-load HTML yüklendiginde
+        // firar; React tree mount + api.get(...) + setState async devam
+        // ediyor — sabit timeout'la bekleyince "Yükleniyor…" gri text
+        // basılıp 1cm bos kagit çıkıyordu. Yeni protokol: print view'ı
+        // datasi gelince window.__printReady = true set ediyor, biz onu
+        // polluyoruz. Max 8sn — sonrasi ya error ya geri-uyumluluk icin
+        // best-effort baski (eski view'lar ready flag set etmeyebilir).
+        const ready = await win.webContents.executeJavaScript(`
+          new Promise((resolve) => {
+            if (window.__printReady === true) { resolve(true); return; }
+            const start = Date.now();
+            const iv = setInterval(() => {
+              if (window.__printReady === true) {
+                clearInterval(iv);
+                resolve(true);
+              } else if (Date.now() - start > 8000) {
+                clearInterval(iv);
+                resolve(false);
+              }
+            }, 100);
+          })
+        `).catch(() => false);
+
+        if (!ready) {
+          log("[print] WARN: __printReady not set within 8s — printing anyway (content may be loading state)");
+        }
+
+        // Ready flag set olsa bile DOM/style/layout son frame'i otursun
+        // diye küçük bir nefes ver.
+        await new Promise((r) => setTimeout(r, 200));
 
         return await new Promise<{ ok: boolean; reason?: string }>((resolve) => {
           win.webContents.print(
