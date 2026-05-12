@@ -38,7 +38,7 @@ interface Props {
  */
 export function EndOfDayReceiptView({ date }: Props) {
   const { storeId } = useStoreContext();
-  const { store, user } = useAuth();
+  const { store } = useAuth();
   const [summary, setSummary] = useState<DailySummaryDto | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -132,7 +132,6 @@ export function EndOfDayReceiptView({ date }: Props) {
       <Hr />
 
       <Row label="Tarih" value={summary.date} />
-      <Row label="Kasiyer" value={user?.fullName ?? "—"} />
       <Row label="Çıktı" value={formatDateTime(new Date().toISOString())} />
 
       <Hr />

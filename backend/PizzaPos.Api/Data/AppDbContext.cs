@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PizzaPos.Api.Entities;
 using System.Linq.Expressions;
 
@@ -59,6 +60,42 @@ public class AppDbContext : DbContext
         ConfigureIncomingCall(modelBuilder);
 
         ApplyTenantQueryFilters(modelBuilder);
+        ApplyUtcDateTimeConverter(modelBuilder);
+    }
+
+    /// <summary>
+    /// SQLite DateTime'ı TEXT olarak timezone bilgisi olmadan saklar; geri
+    /// okurken Kind=Unspecified gelir, System.Text.Json "Z" suffix'i ekleyemez,
+    /// frontend ISO'yu LOKAL zaman sanır → 3 saat geri görünür (UTC+3).
+    /// Çözüm: tüm DateTime/DateTime? prop'larına value converter — yazarken
+    /// UTC'ye çevir, okurken Kind=UTC işaretle. Postgres (cloud) zaten
+    /// `timestamp with time zone` ile doğru handle ediyor, ekstra dönüşüm
+    /// no-op sayılır.
+    /// </summary>
+    private static void ApplyUtcDateTimeConverter(ModelBuilder modelBuilder)
+    {
+        var utcConverter = new ValueConverter<DateTime, DateTime>(
+            v => v.Kind == DateTimeKind.Utc ? v : v.ToUniversalTime(),
+            v => DateTime.SpecifyKind(v, DateTimeKind.Utc));
+
+        var utcConverterNullable = new ValueConverter<DateTime?, DateTime?>(
+            v => v.HasValue
+                ? (v.Value.Kind == DateTimeKind.Utc ? v : v.Value.ToUniversalTime())
+                : v,
+            v => v.HasValue
+                ? DateTime.SpecifyKind(v.Value, DateTimeKind.Utc)
+                : v);
+
+        foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+        {
+            foreach (var property in entityType.GetProperties())
+            {
+                if (property.ClrType == typeof(DateTime))
+                    property.SetValueConverter(utcConverter);
+                else if (property.ClrType == typeof(DateTime?))
+                    property.SetValueConverter(utcConverterNullable);
+            }
+        }
     }
 
     private static void ConfigureOutboxEvent(ModelBuilder mb)

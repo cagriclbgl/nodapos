@@ -34,7 +34,7 @@ const METHOD_LABEL: Record<PaymentMethod, string> = {
  */
 export function ReceiptView({ orderId }: Props) {
   const { storeId } = useStoreContext();
-  const { store, user } = useAuth();
+  const { store } = useAuth();
   const [order, setOrder] = useState<OrderDto | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -138,7 +138,6 @@ export function ReceiptView({ orderId }: Props) {
         <Row label="Kapanış" value={formatDateTime(order.completedAt)} />
       )}
       <Row label="Tip" value={targetLabel} />
-      <Row label="Kasiyer" value={user?.fullName ?? "—"} />
       {order.customerName && (
         <Row label="Müşteri" value={order.customerName} />
       )}
