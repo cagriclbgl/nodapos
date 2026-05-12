@@ -289,19 +289,21 @@ function registerPrinterIpc(): void {
       const cfg = getPrinterConfig();
       const path = opts.url.startsWith("/") ? opts.url : `/${opts.url}`;
       const sep = path.includes("?") ? "&" : "?";
-      // useDialog=true ise sayfa ?silent=1 görmesin (otomatik window.print()
-      // çalışsın, sistem yazıcı dialog'u kasiyere açılsın). Aksi halde silent.
-      const full = cfg.useDialog
-        ? `http://127.0.0.1:${activeFrontendPort}${path}`
-        : `http://127.0.0.1:${activeFrontendPort}${path}${sep}silent=1`;
+      // ÖNEMLİ: URL her zaman ?silent=1 içerir — bu sayfanın kendi
+      // window.print()'ini ATLAR. Print kararı (silent vs dialog) main
+      // process'in webContents.print() çağrısının `silent` flag'ine bağlı.
+      // useDialog=true'da URL'den silent=1'i çıkarmak, sayfa + main olmak
+      // üzere ÇİFT print tetikliyordu.
+      const full = `http://127.0.0.1:${activeFrontendPort}${path}${sep}silent=1`;
       log(`[print] ${cfg.useDialog ? "dialog" : "silent"} print → ${full} (${cfg.paperWidthMm}x${cfg.paperHeightMm}mm)`);
 
-      // Dialog moduna düştüğünde hidden window'da yine yükle ama
-      // webContents.print({silent: false}) ile Windows yazıcı dialog'u açılsın.
-      // Bu eski (v0.1.9 öncesi) davranışın aynısı — yazıcı sürücüsü düzgün set
-      // edilmemiş ortamlarda kurtarıcı.
+      // Dialog modunda hidden window görünür olsun — kasiyer Windows yazıcı
+      // dialog'unu modal olarak görebilsin. Silent modda gizli kalır.
       const win = new BrowserWindow({
         show: cfg.useDialog,
+        width: cfg.useDialog ? 600 : 400,
+        height: cfg.useDialog ? 800 : 600,
+        title: cfg.useDialog ? "Yazdır" : undefined,
         webPreferences: {
           contextIsolation: true,
           nodeIntegration: false,
