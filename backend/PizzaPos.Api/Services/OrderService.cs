@@ -583,15 +583,14 @@ public class OrderService : IOrderService
         if (!combo.IsActive)
             throw DomainException.Conflict($"Kombo '{combo.Name}' aktif değil.");
 
-        if (combo.Items.Count == 0)
-            throw DomainException.Conflict($"Kombo '{combo.Name}' boş — yönetici en az bir ürün eklemeli.");
-
         // Notes formatı: "2x Klasik Pizza, 1x Cola (Büyük)" — fiş ve mutfak
         // ekranında combo içeriği bu satırla görünür. Kasiyer kombo'daki
         // opsiyonu olan ürünler için varyant seçtiyse, parantez içinde
         // opsiyon adlarını ekleriz. ProductId snapshot için combo'nun ilk
         // ürünü bağlanır (FK gerekliliği), ProductName/UnitPrice combo'dan
-        // override eder.
+        // override eder. Combo boşsa (ürünsüz kampanya) mağazadaki herhangi
+        // bir aktif ürünü FK için seed olarak kullanırız — kasiyer ekrana
+        // sadece combo adı + fiyatı görür, içerik metni boş kalır.
         var sortedItems = combo.Items.OrderBy(i => i.DisplayOrder).ToList();
         var summaryParts = new List<string>(sortedItems.Count);
         foreach (var ci in sortedItems)
@@ -615,7 +614,9 @@ public class OrderService : IOrderService
 
             summaryParts.Add(part);
         }
-        var firstProductId = sortedItems[0].ProductId;
+        var firstProductId = sortedItems.Count > 0
+            ? sortedItems[0].ProductId
+            : await ResolveFallbackProductIdAsync(ct);
 
         var item = new OrderItem
         {
@@ -1019,8 +1020,6 @@ public class OrderService : IOrderService
 
         if (!combo.IsActive)
             throw DomainException.Conflict($"Kombo '{combo.Name}' aktif değil.");
-        if (combo.Items.Count == 0)
-            throw DomainException.Conflict($"Kombo '{combo.Name}' boş.");
 
         var sortedItems = combo.Items.OrderBy(i => i.DisplayOrder).ToList();
         var summaryParts = new List<string>(sortedItems.Count);
@@ -1047,9 +1046,12 @@ public class OrderService : IOrderService
         }
 
         var unit = EffectiveComboPrice(combo, order.OrderType);
+        var fkProductId = sortedItems.Count > 0
+            ? sortedItems[0].ProductId
+            : await ResolveFallbackProductIdAsync(ct);
         var item = new OrderItem
         {
-            ProductId = sortedItems[0].ProductId,
+            ProductId = fkProductId,
             ProductName = combo.Name,              // SNAPSHOT (combo adı)
             UnitPrice = unit,                      // SNAPSHOT
             Quantity = request.Quantity,
@@ -1057,6 +1059,24 @@ public class OrderService : IOrderService
             LineTotal = unit * request.Quantity,
         };
         order.Items.Add(item);
+    }
+
+    /// <summary>
+    /// Combo'da ürün yoksa (boş/serbest kombo) OrderItem.ProductId FK'si için
+    /// mağazadan bir aktif ürün seçer. Snapshot semantiği gereği ProductName/
+    /// UnitPrice combo'dan override eder; sadece FK için fiziksel bir hedef
+    /// gerekiyor. Mağaza hiç ürünsüzse anlamlı hata fırlatır.
+    /// </summary>
+    private async Task<Guid> ResolveFallbackProductIdAsync(CancellationToken ct)
+    {
+        var fallbackId = await _db.Products
+            .OrderBy(p => p.DisplayOrder)
+            .Select(p => (Guid?)p.Id)
+            .FirstOrDefaultAsync(ct);
+        if (fallbackId is null)
+            throw DomainException.Conflict(
+                "Boş kombo eklemek için mağazada en az bir ürün bulunmalı.");
+        return fallbackId.Value;
     }
 
     /// <summary>

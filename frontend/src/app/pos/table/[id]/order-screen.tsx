@@ -200,15 +200,12 @@ export function OrderScreen({ tableId }: Props) {
    * snapshot OrderItem olarak sepete iner — varyant/dialog yok. Adisyonda
    * "Kampanya Adı" + içerik notları görünür, fiyat combo'nun sabit fiyatı.
    *
-   * Aktif sipariş yoksa, combo'nun ilk ürününü seed olarak gönderip siparişi
-   * açar, sonra /api/orders/{id}/combos ile combo'yu ekler ve seed kalemi
-   * siler (combo eklendiği için son kalem değil, auto-cancel tetiklenmez).
+   * Aktif sipariş yoksa siparişi açmak için seed kalem gerek. Önce combo'nun
+   * ilk ürününü dene; boş kombo ise mağazadaki ilk ürünü kullan. Combo
+   * eklendikten sonra seed silinir (combo son kalem olmadığı için
+   * auto-cancel tetiklenmez).
    */
   const onComboClick = (combo: ComboDto) => {
-    if (combo.items.length === 0) {
-      setActionError("Bu kampanyada ürün yok.");
-      return;
-    }
     void submitCombo(combo);
   };
 
@@ -221,13 +218,21 @@ export function OrderScreen({ tableId }: Props) {
       let seedItemId: string | null = null;
 
       if (!order) {
+        const seedProductId =
+          combo.items[0]?.productId ?? products[0]?.id;
+        if (!seedProductId) {
+          setActionError(
+            "Sipariş açmak için en az bir ürün gerek — mağazaya ürün ekle."
+          );
+          return;
+        }
         const seedPayload: CreateOrderRequest = {
           tableId: table.id,
           orderType: "DineIn",
           discountAmount: 0,
           items: [
             {
-              productId: combo.items[0].productId,
+              productId: seedProductId,
               quantity: 1,
               productOptionIds: [],
             },

@@ -309,10 +309,6 @@ export function DeliveryOrderScreen({
    * Adı" + içerik görünür.
    */
   const onComboClick = (combo: ComboDto) => {
-    if (combo.items.length === 0) {
-      setActionError("Bu kampanyada ürün yok.");
-      return;
-    }
     const unit = effComboPrice(combo);
     const productById = new Map(products.map((p) => [p.id, p]));
     const summaryParts = combo.items
