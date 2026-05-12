@@ -47,12 +47,16 @@ public class ProductService : IProductService
         var category = await _db.Categories.FindAsync([request.CategoryId], ct)
             ?? throw DomainException.NotFound("Category");
 
+        if (request.DeliveryPrice.HasValue && request.DeliveryPrice.Value < 0)
+            throw new DomainException("Delivery price must be non-negative.");
+
         var product = new Product
         {
             CategoryId = category.Id,
             Name = request.Name.Trim(),
             Description = request.Description,
             Price = request.Price,
+            DeliveryPrice = request.DeliveryPrice,
             ImageUrl = request.ImageUrl,
             IsAvailable = true,
             DisplayOrder = request.DisplayOrder
@@ -77,10 +81,14 @@ public class ProductService : IProductService
         var category = await _db.Categories.FindAsync([request.CategoryId], ct)
             ?? throw DomainException.NotFound("Category");
 
+        if (request.DeliveryPrice.HasValue && request.DeliveryPrice.Value < 0)
+            throw new DomainException("Delivery price must be non-negative.");
+
         product.CategoryId = category.Id;
         product.Name = request.Name.Trim();
         product.Description = request.Description;
         product.Price = request.Price;
+        product.DeliveryPrice = request.DeliveryPrice;
         product.ImageUrl = request.ImageUrl;
         product.IsAvailable = request.IsAvailable;
         product.DisplayOrder = request.DisplayOrder;
@@ -160,6 +168,7 @@ public class ProductService : IProductService
             p.Name,
             p.Description,
             p.Price,
+            p.DeliveryPrice,
             p.ImageUrl,
             p.IsAvailable,
             p.DisplayOrder,

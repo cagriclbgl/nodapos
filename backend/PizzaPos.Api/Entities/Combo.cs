@@ -11,6 +11,11 @@ public class Combo : TenantEntity
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
     public decimal Price { get; set; }
+    /// <summary>
+    /// Paket servis (Delivery) sipariş tipinde uygulanan kombo fiyatı.
+    /// Null ise Price'a düşülür.
+    /// </summary>
+    public decimal? DeliveryPrice { get; set; }
     public bool IsActive { get; set; } = true;
     public int DisplayOrder { get; set; }
 

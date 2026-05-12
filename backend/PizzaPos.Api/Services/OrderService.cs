@@ -166,7 +166,7 @@ public class OrderService : IOrderService
         // ExecuteUpdate sidesteps that path entirely.
         var orderInfo = await _db.Orders
             .Where(o => o.Id == orderId)
-            .Select(o => new { o.Id, o.Status, o.DiscountAmount })
+            .Select(o => new { o.Id, o.Status, o.DiscountAmount, o.OrderType })
             .FirstOrDefaultAsync(ct)
             ?? throw DomainException.NotFound("Order");
 
@@ -185,8 +185,8 @@ public class OrderService : IOrderService
         {
             OrderId = orderInfo.Id,
             ProductId = product.Id,
-            ProductName = product.Name,   // SNAPSHOT
-            UnitPrice = product.Price,    // SNAPSHOT
+            ProductName = product.Name,                                // SNAPSHOT
+            UnitPrice = EffectivePrice(product, orderInfo.OrderType),  // SNAPSHOT
             Quantity = line.Quantity,
             Notes = line.Notes
         };
@@ -566,7 +566,7 @@ public class OrderService : IOrderService
 
         var orderInfo = await _db.Orders
             .Where(o => o.Id == orderId)
-            .Select(o => new { o.Id, o.Status, o.DiscountAmount })
+            .Select(o => new { o.Id, o.Status, o.DiscountAmount, o.OrderType })
             .FirstOrDefaultAsync(ct)
             ?? throw DomainException.NotFound("Order");
 
@@ -576,6 +576,7 @@ public class OrderService : IOrderService
         var combo = await _db.Combos
             .Include(c => c.Items)
                 .ThenInclude(i => i.Product)
+                    .ThenInclude(p => p!.Options)
             .FirstOrDefaultAsync(c => c.Id == request.ComboId, ct)
             ?? throw DomainException.NotFound("Kombo");
 
@@ -585,22 +586,43 @@ public class OrderService : IOrderService
         if (combo.Items.Count == 0)
             throw DomainException.Conflict($"Kombo '{combo.Name}' boş — yönetici en az bir ürün eklemeli.");
 
-        // Notes formatı: "2x Klasik Pizza, 1x Cola" — fiş ve mutfak ekranında
-        // combo içeriği bu satırla görünür. ProductId snapshot için combo'nun
-        // ilk ürünü bağlanır (FK gerekliliği), ProductName/UnitPrice combo'dan
+        // Notes formatı: "2x Klasik Pizza, 1x Cola (Büyük)" — fiş ve mutfak
+        // ekranında combo içeriği bu satırla görünür. Kasiyer kombo'daki
+        // opsiyonu olan ürünler için varyant seçtiyse, parantez içinde
+        // opsiyon adlarını ekleriz. ProductId snapshot için combo'nun ilk
+        // ürünü bağlanır (FK gerekliliği), ProductName/UnitPrice combo'dan
         // override eder.
         var sortedItems = combo.Items.OrderBy(i => i.DisplayOrder).ToList();
-        var summaryParts = sortedItems
-            .Select(i => $"{i.Quantity}x {i.Product?.Name ?? "(ürün bulunamadı)"}")
-            .ToList();
+        var summaryParts = new List<string>(sortedItems.Count);
+        foreach (var ci in sortedItems)
+        {
+            var name = ci.Product?.Name ?? "(ürün bulunamadı)";
+            var part = $"{ci.Quantity}x {name}";
+
+            if (request.ItemOptionSelections is not null
+                && request.ItemOptionSelections.TryGetValue(ci.Id, out var optionIds)
+                && optionIds is { Count: > 0 }
+                && ci.Product is not null)
+            {
+                var matched = ci.Product.Options
+                    .Where(o => optionIds.Contains(o.Id) && o.IsActive)
+                    .OrderBy(o => o.DisplayOrder)
+                    .Select(o => o.Name)
+                    .ToList();
+                if (matched.Count > 0)
+                    part += $" ({string.Join(", ", matched)})";
+            }
+
+            summaryParts.Add(part);
+        }
         var firstProductId = sortedItems[0].ProductId;
 
         var item = new OrderItem
         {
             OrderId = orderInfo.Id,
             ProductId = firstProductId,
-            ProductName = combo.Name,        // SNAPSHOT (combo adı)
-            UnitPrice = combo.Price,         // SNAPSHOT (combo fiyatı)
+            ProductName = combo.Name,                                              // SNAPSHOT (combo adı)
+            UnitPrice = EffectiveComboPrice(combo, orderInfo.OrderType),           // SNAPSHOT
             Quantity = request.Quantity,
             Notes = string.Join(", ", summaryParts),
         };
@@ -646,8 +668,10 @@ public class OrderService : IOrderService
     public async Task<OrderDto> CreateDeliveryAsync(
         CreateDeliveryOrderRequest request, CancellationToken ct = default)
     {
-        if (request.Items is null || request.Items.Count == 0)
-            throw new DomainException("Order must contain at least one item.");
+        var itemsCount = request.Items?.Count ?? 0;
+        var combosCount = request.Combos?.Count ?? 0;
+        if (itemsCount == 0 && combosCount == 0)
+            throw new DomainException("Order must contain at least one item or combo.");
         if (request.OrderType is not (OrderType.Takeaway or OrderType.Delivery))
             throw new DomainException("CreateDelivery only supports Takeaway or Delivery order types.");
 
@@ -706,8 +730,21 @@ public class OrderService : IOrderService
 
         _db.Orders.Add(order);
 
-        foreach (var line in request.Items)
-            await BuildAndAttachItemAsync(order, line, ct);
+        if (request.Items is not null)
+        {
+            foreach (var line in request.Items)
+                await BuildAndAttachItemAsync(order, line, ct);
+        }
+
+        // Kombolar: AddComboAsync ile aynı snapshot semantiği — tek OrderItem
+        // satırı, Notes'a kombo içeriği (+ varyantlar) yazılır. Burada FK
+        // problemini önlemek için item'ları doğrudan order.Items'a ekliyoruz
+        // (order henüz SaveChanges görmemiş, ID atomik commit'te oturur).
+        if (request.Combos is not null && request.Combos.Count > 0)
+        {
+            foreach (var c in request.Combos)
+                await BuildAndAttachComboAsync(order, c, ct);
+        }
 
         RecalculateTotals(order);
 
@@ -921,8 +958,8 @@ public class OrderService : IOrderService
         var item = new OrderItem
         {
             ProductId = product.Id,
-            ProductName = product.Name,   // SNAPSHOT
-            UnitPrice = product.Price,    // SNAPSHOT
+            ProductName = product.Name,                            // SNAPSHOT
+            UnitPrice = EffectivePrice(product, order.OrderType),  // SNAPSHOT — paket servis fiyatı varsa
             Quantity = line.Quantity,
             Notes = line.Notes
         };
@@ -960,6 +997,82 @@ public class OrderService : IOrderService
         var total = order.Subtotal - order.DiscountAmount;
         order.Total = total < 0 ? 0 : total;
     }
+
+    /// <summary>
+    /// CreateDeliveryAsync için combo'yu order.Items'a EKLER (henüz SaveChanges
+    /// görmemiş Order graph'i). AddComboAsync ile aynı semantiği taşır —
+    /// tek snapshot OrderItem (ProductName=combo.Name, UnitPrice=EffectiveCombo,
+    /// Notes="2x Kola (Büyük), 1x Pizza"). FK için combo'nun ilk ürününe bağlar.
+    /// </summary>
+    private async Task BuildAndAttachComboAsync(
+        Order order, AddComboToOrderRequest request, CancellationToken ct)
+    {
+        if (request.Quantity <= 0)
+            throw new DomainException("Combo quantity must be positive.");
+
+        var combo = await _db.Combos
+            .Include(c => c.Items)
+                .ThenInclude(i => i.Product)
+                    .ThenInclude(p => p!.Options)
+            .FirstOrDefaultAsync(c => c.Id == request.ComboId, ct)
+            ?? throw DomainException.NotFound("Kombo");
+
+        if (!combo.IsActive)
+            throw DomainException.Conflict($"Kombo '{combo.Name}' aktif değil.");
+        if (combo.Items.Count == 0)
+            throw DomainException.Conflict($"Kombo '{combo.Name}' boş.");
+
+        var sortedItems = combo.Items.OrderBy(i => i.DisplayOrder).ToList();
+        var summaryParts = new List<string>(sortedItems.Count);
+        foreach (var ci in sortedItems)
+        {
+            var name = ci.Product?.Name ?? "(ürün bulunamadı)";
+            var part = $"{ci.Quantity}x {name}";
+
+            if (request.ItemOptionSelections is not null
+                && request.ItemOptionSelections.TryGetValue(ci.Id, out var optionIds)
+                && optionIds is { Count: > 0 }
+                && ci.Product is not null)
+            {
+                var matched = ci.Product.Options
+                    .Where(o => optionIds.Contains(o.Id) && o.IsActive)
+                    .OrderBy(o => o.DisplayOrder)
+                    .Select(o => o.Name)
+                    .ToList();
+                if (matched.Count > 0)
+                    part += $" ({string.Join(", ", matched)})";
+            }
+
+            summaryParts.Add(part);
+        }
+
+        var unit = EffectiveComboPrice(combo, order.OrderType);
+        var item = new OrderItem
+        {
+            ProductId = sortedItems[0].ProductId,
+            ProductName = combo.Name,              // SNAPSHOT (combo adı)
+            UnitPrice = unit,                      // SNAPSHOT
+            Quantity = request.Quantity,
+            Notes = string.Join(", ", summaryParts),
+            LineTotal = unit * request.Quantity,
+        };
+        order.Items.Add(item);
+    }
+
+    /// <summary>
+    /// Sipariş tipi Delivery ise ürün/kombo paket servis fiyatına düşer
+    /// (DeliveryPrice null ise normal fiyata fallback). Diğer tipler
+    /// (DineIn / Takeaway / gel-al) her zaman Price kullanır.
+    /// </summary>
+    private static decimal EffectivePrice(Product product, OrderType orderType) =>
+        orderType == OrderType.Delivery
+            ? (product.DeliveryPrice ?? product.Price)
+            : product.Price;
+
+    private static decimal EffectiveComboPrice(Combo combo, OrderType orderType) =>
+        orderType == OrderType.Delivery
+            ? (combo.DeliveryPrice ?? combo.Price)
+            : combo.Price;
 
     private static string GenerateOrderNumber()
     {

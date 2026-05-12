@@ -32,6 +32,10 @@ import { cn } from "@/lib/utils";
 import { OptionsDialog } from "./options-dialog";
 import { PaymentDialog } from "./payment-dialog";
 import { DetailsDialog } from "./details-dialog";
+import {
+  ComboOptionsDialog,
+  comboNeedsVariants,
+} from "./combo-options-dialog";
 
 const COMBO_TAB = "__combos__";
 
@@ -59,6 +63,7 @@ export function OrderScreen({ tableId }: Props) {
   const [selectedCat, setSelectedCat] = useState<string>("");
 
   const [pendingProduct, setPendingProduct] = useState<ProductDto | null>(null);
+  const [pendingCombo, setPendingCombo] = useState<ComboDto | null>(null);
   const [showPayment, setShowPayment] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
 
@@ -196,20 +201,33 @@ export function OrderScreen({ tableId }: Props) {
   };
 
   /**
-   * Combo'yu mevcut siparişe ekler. Yeni model: backend tek snapshot OrderItem
-   * yaratıyor (ProductName=combo.Name, UnitPrice=combo.Price, Notes ürün
-   * özeti). Kasiyer tarafında modal/dialog yok — combo'ya tıkla, sepete iner.
+   * Combo'yu mevcut siparişe ekler. Backend tek snapshot OrderItem yaratıyor
+   * (ProductName=combo.Name, UnitPrice=combo.Price, Notes ürün özeti).
+   * Kasiyer kampanyaya tıkladığında varyantı olan ürünler için
+   * ComboOptionsDialog açılır; seçilen opsiyonlar Notes'a "(Büyük)" gibi
+   * yansır. Hiç varyant gerekmiyorsa dialog atlanır.
    *
    * Aktif sipariş yoksa, combo'nun ilk ürününü seed olarak gönderip siparişi
    * açar, sonra /api/orders/{id}/combos ile combo'yu ekler ve seed kalemi
    * siler (combo eklendiği için son kalem değil, auto-cancel tetiklenmez).
    */
-  const addCombo = async (combo: ComboDto) => {
-    if (!storeId || !table) return;
+  const onComboClick = (combo: ComboDto) => {
     if (combo.items.length === 0) {
       setActionError("Bu kampanyada ürün yok.");
       return;
     }
+    if (comboNeedsVariants(combo, products)) {
+      setPendingCombo(combo);
+      return;
+    }
+    void submitCombo(combo, {});
+  };
+
+  const submitCombo = async (
+    combo: ComboDto,
+    itemOptionSelections: Record<string, string[]>
+  ) => {
+    if (!storeId || !table) return;
     setBusy(true);
     setActionError(null);
     try {
@@ -243,6 +261,9 @@ export function OrderScreen({ tableId }: Props) {
       const afterCombo = await ordersApi.addCombo(workingOrderId, {
         comboId: combo.id,
         quantity: 1,
+        itemOptionSelections: Object.keys(itemOptionSelections).length
+          ? itemOptionSelections
+          : undefined,
       });
 
       if (seedItemId) {
@@ -254,6 +275,7 @@ export function OrderScreen({ tableId }: Props) {
       } else {
         setOrder(afterCombo);
       }
+      setPendingCombo(null);
     } catch (err) {
       setActionError(describeError(err));
     } finally {
@@ -428,7 +450,7 @@ export function OrderScreen({ tableId }: Props) {
                     return (
                       <button
                         key={c.id}
-                        onClick={() => void addCombo(c)}
+                        onClick={() => onComboClick(c)}
                         disabled={busy}
                         className="flex min-h-[120px] flex-col items-start justify-between rounded-2xl border bg-card p-4 text-left text-card-foreground shadow-sm transition-all hover:border-primary/60 hover:shadow-md active:scale-[0.99] disabled:opacity-60"
                       >
@@ -612,6 +634,15 @@ export function OrderScreen({ tableId }: Props) {
             await addLine(line);
             setPendingProduct(null);
           }}
+        />
+      )}
+
+      {pendingCombo && (
+        <ComboOptionsDialog
+          combo={pendingCombo}
+          products={products}
+          onClose={() => setPendingCombo(null)}
+          onConfirm={(selections) => submitCombo(pendingCombo, selections)}
         />
       )}
 

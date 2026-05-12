@@ -139,6 +139,8 @@ export interface ProductDto {
   name: string;
   description?: string | null;
   price: number;
+  /** Paket servis (Delivery) fiyatı — null ise normal price'a fallback. */
+  deliveryPrice?: number | null;
   imageUrl?: string | null;
   isAvailable: boolean;
   displayOrder: number;
@@ -150,6 +152,7 @@ export interface CreateProductRequest {
   name: string;
   description?: string | null;
   price: number;
+  deliveryPrice?: number | null;
   imageUrl?: string | null;
   displayOrder: number;
 }
@@ -274,6 +277,8 @@ export interface ComboDto {
   name: string;
   description: string | null;
   price: number;
+  /** Paket servis (Delivery) kombo fiyatı — null ise normal price'a fallback. */
+  deliveryPrice?: number | null;
   isActive: boolean;
   displayOrder: number;
   items: ComboItemDto[];
@@ -289,6 +294,7 @@ export interface CreateComboRequest {
   name: string;
   description?: string | null;
   price: number;
+  deliveryPrice?: number | null;
   displayOrder: number;
   items: CreateComboItemRequest[];
 }
@@ -297,6 +303,7 @@ export interface UpdateComboRequest {
   name: string;
   description?: string | null;
   price: number;
+  deliveryPrice?: number | null;
   isActive: boolean;
   displayOrder: number;
   items: CreateComboItemRequest[];
@@ -305,6 +312,13 @@ export interface UpdateComboRequest {
 export interface AddComboToOrderRequest {
   comboId: string;
   quantity: number;
+  /**
+   * Kasiyer kombo'daki opsiyonu olan ürünler için varyant seçtiyse
+   * (örn. "Kutu Kola - Büyük"), anahtar = comboItemId, değer = seçilen
+   * ProductOption id listesi. Combo fiyatı sabit kalır, opsiyonlar
+   * sadece Notes snapshot'ına "Kutu Kola (Büyük)" olarak yansır.
+   */
+  itemOptionSelections?: Record<string, string[]>;
 }
 
 export interface CustomerListItemDto {
@@ -508,4 +522,6 @@ export interface CreateDeliveryOrderRequest {
   discountAmount: number;
   items: AddOrderItemRequest[];
   incomingCallId?: string | null;
+  /** Paket/Kurye siparişine eklenecek kombolar — Items'la bağımsız liste. */
+  combos?: AddComboToOrderRequest[];
 }

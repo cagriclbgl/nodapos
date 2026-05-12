@@ -36,6 +36,8 @@ interface Draft {
   name: string;
   description: string;
   price: number;
+  /** null = paket servis tarafında da Price kullan. */
+  deliveryPrice: number | null;
   displayOrder: number;
   isActive: boolean;
   items: DraftItem[];
@@ -45,6 +47,7 @@ const EMPTY_DRAFT: Draft = {
   name: "",
   description: "",
   price: 0,
+  deliveryPrice: null,
   displayOrder: 0,
   isActive: true,
   items: [],
@@ -110,6 +113,7 @@ export default function CombosPage() {
       name: c.name,
       description: c.description ?? "",
       price: c.price,
+      deliveryPrice: c.deliveryPrice ?? null,
       displayOrder: c.displayOrder,
       isActive: c.isActive,
       items: c.items.map((i) => ({
@@ -198,6 +202,7 @@ export default function CombosPage() {
           name: draft.name.trim(),
           description: draft.description.trim() || null,
           price: draft.price,
+          deliveryPrice: draft.deliveryPrice,
           isActive: draft.isActive,
           displayOrder: draft.displayOrder,
           items: itemsPayload,
@@ -208,6 +213,7 @@ export default function CombosPage() {
           name: draft.name.trim(),
           description: draft.description.trim() || null,
           price: draft.price,
+          deliveryPrice: draft.deliveryPrice,
           displayOrder: draft.displayOrder,
           items: itemsPayload,
         };
@@ -332,10 +338,10 @@ export default function CombosPage() {
 
       <Dialog open={open} onOpenChange={(v) => (v ? null : close())}>
         <DialogContent
-          className="max-h-[90vh] max-w-4xl overflow-hidden p-0 sm:max-w-4xl"
+          className="flex max-h-[90vh] max-w-4xl flex-col overflow-hidden p-0 sm:max-w-4xl"
           onInteractOutside={(e) => busy && e.preventDefault()}
         >
-          <DialogHeader className="border-b px-6 py-4">
+          <DialogHeader className="flex-shrink-0 border-b px-6 py-4">
             <DialogTitle>
               {editing ? "Kampanyayı Düzenle" : "Yeni Kampanya"}
             </DialogTitle>
@@ -372,7 +378,7 @@ export default function CombosPage() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="grid gap-2">
-                  <Label htmlFor="combo-price">Fiyat (₺)</Label>
+                  <Label htmlFor="combo-price">Kasa fiyatı (gel-al, ₺)</Label>
                   <Input
                     id="combo-price"
                     type="number"
@@ -389,20 +395,43 @@ export default function CombosPage() {
                   />
                 </div>
                 <div className="grid gap-2">
-                  <Label htmlFor="combo-order">Sıra</Label>
+                  <Label htmlFor="combo-delivery-price">
+                    Paket servis fiyatı (₺){" "}
+                    <span className="text-muted-foreground">— boş = kasa fiyatı</span>
+                  </Label>
                   <Input
-                    id="combo-order"
+                    id="combo-delivery-price"
                     type="number"
-                    inputMode="numeric"
-                    value={draft.displayOrder}
-                    onChange={(e) =>
+                    inputMode="decimal"
+                    step="0.01"
+                    min={0}
+                    value={draft.deliveryPrice ?? ""}
+                    placeholder={String(draft.price)}
+                    onChange={(e) => {
+                      const v = e.target.value.trim();
                       setDraft((d) => ({
                         ...d,
-                        displayOrder: Number(e.target.value) || 0,
-                      }))
-                    }
+                        deliveryPrice: v === "" ? null : Number(v) || 0,
+                      }));
+                    }}
                   />
                 </div>
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="combo-order">Sıra</Label>
+                <Input
+                  id="combo-order"
+                  type="number"
+                  inputMode="numeric"
+                  value={draft.displayOrder}
+                  onChange={(e) =>
+                    setDraft((d) => ({
+                      ...d,
+                      displayOrder: Number(e.target.value) || 0,
+                    }))
+                  }
+                />
               </div>
 
               <label className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2">

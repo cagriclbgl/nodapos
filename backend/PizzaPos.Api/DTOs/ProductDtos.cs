@@ -7,6 +7,7 @@ public record ProductDto(
     string Name,
     string? Description,
     decimal Price,
+    decimal? DeliveryPrice,
     string? ImageUrl,
     bool IsAvailable,
     int DisplayOrder,
@@ -26,6 +27,7 @@ public record CreateProductRequest(
     string Name,
     string? Description,
     decimal Price,
+    decimal? DeliveryPrice,
     string? ImageUrl,
     int DisplayOrder);
 
@@ -34,6 +36,7 @@ public record UpdateProductRequest(
     string Name,
     string? Description,
     decimal Price,
+    decimal? DeliveryPrice,
     string? ImageUrl,
     bool IsAvailable,
     int DisplayOrder);

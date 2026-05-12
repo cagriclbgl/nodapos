@@ -259,11 +259,17 @@ var app = builder.Build();
     var schemaDb = schemaScope.ServiceProvider.GetRequiredService<AppDbContext>();
     if (string.Equals(dbProvider, "Sqlite", StringComparison.OrdinalIgnoreCase))
     {
-        // EnsureCreated mevcut DB'ye dokunmaz (sadece tum DB bossa tablolari
-        // yaratir). Yani sema degisiklikleri sonrasi manuel DROP + CREATE gerek.
-        // Combo schema breaking change (slot→product): eski combo_items
-        // tablosunu DROP edip yeni kolonlarla yeniden yaratiyoruz. Combo data
-        // zaten cloud-only, pull worker tazeleyecek.
+        // Sira KRITIK: EnsureCreated once. EF "model tablosundan biri var" diye
+        // semayi atlar; eger combo_items'i once kendimiz yaratsak tum diger
+        // tablolar (stores/users/supervisors/...) yaratilmaz, ilk supervisor
+        // seed sorgusunda "no such table: supervisors" ile API coker.
+        await schemaDb.Database.EnsureCreatedAsync();
+
+        // Combo schema breaking change (slot→product, v0.1.7): eski kurulumda
+        // combo_items eski slot-based kolonlarla durur, EnsureCreated zaten var
+        // sandigi icin guncellemez. DROP+CREATE idempotent migration; fresh
+        // install'da da zararsiz (ayni semayla yeniden yaratir). Combo data
+        // cloud-only, pull worker tazeleyecek.
         await schemaDb.Database.ExecuteSqlRawAsync("""
             DROP TABLE IF EXISTS combo_items;
             CREATE TABLE combo_items (
@@ -284,9 +290,22 @@ var app = builder.Build();
             CREATE INDEX IF NOT EXISTS IX_combo_items_StoreId_ProductId
                 ON combo_items (StoreId, ProductId);
             """);
-        // Sonra EnsureCreated ile eksik kalan baska tablolar varsa yaratilsin
-        // (gercekte combos tablosu zaten varsa Combo entity ile uyumlu).
-        await schemaDb.Database.EnsureCreatedAsync();
+
+        // Idempotent ADD COLUMN — EnsureCreated mevcut tablolara yeni kolon
+        // EKLEMEZ. Upgrade akışında bu satırlar olmadan v0.1.9'a güncellenen
+        // kasalar yeni alanları görmez. Duplicate column hatası bekliyoruz
+        // (zaten varsa); onu yutuyoruz.
+        async Task TryAddColumn(string sql)
+        {
+            try { await schemaDb.Database.ExecuteSqlRawAsync(sql); }
+            catch (Microsoft.Data.Sqlite.SqliteException ex)
+                when (ex.Message.Contains("duplicate column", StringComparison.OrdinalIgnoreCase))
+            {
+                // already added
+            }
+        }
+        await TryAddColumn("ALTER TABLE products ADD COLUMN DeliveryPrice TEXT NULL;");
+        await TryAddColumn("ALTER TABLE combos ADD COLUMN DeliveryPrice TEXT NULL;");
     }
     else
     {

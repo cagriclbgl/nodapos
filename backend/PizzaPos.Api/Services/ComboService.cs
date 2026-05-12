@@ -39,7 +39,7 @@ public class ComboService : IComboService
 
     public async Task<ComboDto> CreateAsync(CreateComboRequest request, CancellationToken ct = default)
     {
-        ValidateBasics(request.Name, request.Price);
+        ValidateBasics(request.Name, request.Price, request.DeliveryPrice);
         if (request.Items is null || request.Items.Count == 0)
             throw new DomainException("Kombo en az bir ürün içermeli.");
 
@@ -50,6 +50,7 @@ public class ComboService : IComboService
             Name = request.Name.Trim(),
             Description = NullIfBlank(request.Description),
             Price = request.Price,
+            DeliveryPrice = request.DeliveryPrice,
             IsActive = true,
             DisplayOrder = request.DisplayOrder,
         };
@@ -76,7 +77,7 @@ public class ComboService : IComboService
             .FirstOrDefaultAsync(c => c.Id == id, ct)
             ?? throw DomainException.NotFound("Kombo");
 
-        ValidateBasics(request.Name, request.Price);
+        ValidateBasics(request.Name, request.Price, request.DeliveryPrice);
         if (request.Items is null || request.Items.Count == 0)
             throw new DomainException("Kombo en az bir ürün içermeli.");
 
@@ -85,6 +86,7 @@ public class ComboService : IComboService
         combo.Name = request.Name.Trim();
         combo.Description = NullIfBlank(request.Description);
         combo.Price = request.Price;
+        combo.DeliveryPrice = request.DeliveryPrice;
         combo.IsActive = request.IsActive;
         combo.DisplayOrder = request.DisplayOrder;
         // Ürün listesi değişikliği parent'ın content değişikliği sayılır — kasa
@@ -117,12 +119,14 @@ public class ComboService : IComboService
         await _db.SaveChangesAsync(ct);
     }
 
-    private static void ValidateBasics(string name, decimal price)
+    private static void ValidateBasics(string name, decimal price, decimal? deliveryPrice)
     {
         if (string.IsNullOrWhiteSpace(name))
             throw new DomainException("Kombo adı zorunlu.");
         if (price < 0)
             throw new DomainException("Kombo fiyatı negatif olamaz.");
+        if (deliveryPrice.HasValue && deliveryPrice.Value < 0)
+            throw new DomainException("Paket servis fiyatı negatif olamaz.");
     }
 
     private async Task EnsureProductsExist(
@@ -142,7 +146,7 @@ public class ComboService : IComboService
         string.IsNullOrWhiteSpace(s) ? null : s.Trim();
 
     private static ComboDto Map(Combo c) =>
-        new(c.Id, c.Name, c.Description, c.Price, c.IsActive, c.DisplayOrder,
+        new(c.Id, c.Name, c.Description, c.Price, c.DeliveryPrice, c.IsActive, c.DisplayOrder,
             c.Items.OrderBy(i => i.DisplayOrder)
                 .Select(i => new ComboItemDto(
                     i.Id, i.ProductId,

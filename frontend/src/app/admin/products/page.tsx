@@ -22,6 +22,7 @@ const EMPTY: CreateProductRequest = {
   name: "",
   description: "",
   price: 0,
+  deliveryPrice: null,
   imageUrl: "",
   displayOrder: 0,
 };
@@ -72,6 +73,7 @@ export default function ProductsPage() {
       name: p.name,
       description: p.description ?? "",
       price: p.price,
+      deliveryPrice: p.deliveryPrice ?? null,
       imageUrl: p.imageUrl ?? "",
       displayOrder: p.displayOrder,
     });
@@ -288,7 +290,7 @@ export default function ProductsPage() {
             }
           />
           <Input
-            label="Fiyat (TL)"
+            label="Kasa fiyatı — gel-al (TL)"
             type="number"
             step="0.01"
             min={0}
@@ -296,6 +298,21 @@ export default function ProductsPage() {
             onChange={(e) =>
               setDraft({ ...draft, price: Number(e.target.value) || 0 })
             }
+          />
+          <Input
+            label="Paket servis fiyatı (TL) — boş = kasa fiyatı"
+            type="number"
+            step="0.01"
+            min={0}
+            value={draft.deliveryPrice ?? ""}
+            placeholder={String(draft.price)}
+            onChange={(e) => {
+              const v = e.target.value.trim();
+              setDraft({
+                ...draft,
+                deliveryPrice: v === "" ? null : Number(v) || 0,
+              });
+            }}
           />
           <Input
             label="Görsel URL"

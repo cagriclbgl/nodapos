@@ -42,7 +42,14 @@ public record CreateDeliveryOrderRequest(
     string? Notes,
     decimal DiscountAmount,
     IReadOnlyList<AddOrderItemRequest> Items,
-    Guid? IncomingCallId = null);
+    Guid? IncomingCallId = null,
+    /// <summary>
+    /// Paket/Kurye siparişine eklenecek kombolar — Items'la bağımsız liste.
+    /// Her kombo backend tarafında AddComboAsync ile aynı snapshot OrderItem'a
+    /// dönüştürülür; varyantı olan ürünler için kasiyer
+    /// ItemOptionSelections'ı doldurarak gönderir.
+    /// </summary>
+    IReadOnlyList<AddComboToOrderRequest>? Combos = null);
 
 /// <summary>
 /// PATCH /api/orders/{id}/fulfillment — Pending → InKitchen → Ready → OutForDelivery → Delivered.

@@ -14,9 +14,15 @@ import { Badge } from "@/components/ui-v2/badge";
 import { Skeleton } from "@/components/ui-v2/skeleton";
 import { cn } from "@/lib/utils";
 import { OptionsDialog } from "@/app/pos/table/[id]/options-dialog";
+import {
+  ComboOptionsDialog,
+  comboNeedsVariants,
+} from "@/app/pos/table/[id]/combo-options-dialog";
 import type {
+  AddComboToOrderRequest,
   AddOrderItemRequest,
   CategoryDto,
+  ComboDto,
   CreateDeliveryOrderRequest,
   CustomerAddressDto,
   CustomerDto,
@@ -24,32 +30,50 @@ import type {
   ProductOptionDto,
 } from "@/types/api";
 
+const COMBO_TAB = "__combos__";
+
 interface Props {
   callId: string | null;
   customerId: string | null;
   prefillPhone: string | null;
 }
 
-interface CartLine {
-  /** Stable per-cart key — birden fazla aynı ürün bulunabilir (notlu / opsiyonsuz). */
-  key: string;
-  productId: string;
-  productName: string;
-  /** Saf ürün fiyatı (seçenek ek fiyatları DAHİL DEĞİL). */
-  unitPrice: number;
-  quantity: number;
-  notes: string | null;
-  /** Seçilen ProductOption Id'leri — backend snapshot için lazım. */
-  productOptionIds: string[];
-  /** UI gösterimi için seçenek özet snapshot'ı (Group: Option +price). */
-  optionSummary: Array<{
-    groupName: string;
-    optionName: string;
-    additionalPrice: number;
-  }>;
-  /** (unitPrice + sum(extras)) × quantity — client-side hesap, backend yine doğrular. */
-  lineTotal: number;
-}
+type CartLine =
+  | {
+      kind: "product";
+      /** Stable per-cart key — birden fazla aynı ürün bulunabilir (notlu / opsiyonsuz). */
+      key: string;
+      productId: string;
+      productName: string;
+      /** Saf ürün fiyatı (seçenek ek fiyatları DAHİL DEĞİL). */
+      unitPrice: number;
+      quantity: number;
+      notes: string | null;
+      /** Seçilen ProductOption Id'leri — backend snapshot için lazım. */
+      productOptionIds: string[];
+      /** UI gösterimi için seçenek özet snapshot'ı (Group: Option +price). */
+      optionSummary: Array<{
+        groupName: string;
+        optionName: string;
+        additionalPrice: number;
+      }>;
+      /** (unitPrice + sum(extras)) × quantity — client-side hesap, backend yine doğrular. */
+      lineTotal: number;
+    }
+  | {
+      kind: "combo";
+      key: string;
+      comboId: string;
+      comboName: string;
+      /** Kombo birim fiyatı (orderType'a göre Price ya da DeliveryPrice). */
+      unitPrice: number;
+      quantity: number;
+      /** Notlar — combo içeriği özeti (UI gösterimi için). */
+      summary: string;
+      /** comboItemId → seçilen ProductOption id listesi (backend payload). */
+      itemOptionSelections?: Record<string, string[]>;
+      lineTotal: number;
+    };
 
 type DeliveryType = "Delivery" | "Takeaway";
 
@@ -73,12 +97,14 @@ export function DeliveryOrderScreen({
 
   const [categories, setCategories] = useState<CategoryDto[]>([]);
   const [products, setProducts] = useState<ProductDto[]>([]);
+  const [combos, setCombos] = useState<ComboDto[]>([]);
   const [selectedCat, setSelectedCat] = useState<string>("");
 
   const [cart, setCart] = useState<CartLine[]>([]);
   const [notes, setNotes] = useState("");
 
   const [pendingProduct, setPendingProduct] = useState<ProductDto | null>(null);
+  const [pendingCombo, setPendingCombo] = useState<ComboDto | null>(null);
   const [bootError, setBootError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -92,14 +118,16 @@ export function DeliveryOrderScreen({
     setBootError(null);
     (async () => {
       try {
-        const [cats, prods] = await Promise.all([
+        const [cats, prods, combosList] = await Promise.all([
           api.get<CategoryDto[]>("/api/categories", storeId),
           api.get<ProductDto[]>("/api/products", storeId),
+          api.get<ComboDto[]>("/api/combos?activeOnly=true", storeId),
         ]);
         if (cancelled) return;
         const activeCats = cats.filter((c) => c.isActive).sort((a, b) => a.displayOrder - b.displayOrder);
         setCategories(activeCats);
         setProducts(prods.filter((p) => p.isAvailable));
+        setCombos(combosList);
         setSelectedCat((prev) => prev || activeCats[0]?.id || "");
 
         if (customerId) {
@@ -149,6 +177,44 @@ export function DeliveryOrderScreen({
     return m;
   }, [products]);
 
+  /** Paket/Kurye = Delivery → DeliveryPrice'a düş; Gel-Al = Takeaway → Price. */
+  const effProductPrice = (p: ProductDto): number =>
+    orderType === "Delivery" ? p.deliveryPrice ?? p.price : p.price;
+  const effComboPrice = (c: ComboDto): number =>
+    orderType === "Delivery" ? c.deliveryPrice ?? c.price : c.price;
+
+  /**
+   * Sipariş tipi (Kurye ↔ Gel-Al) değiştiğinde sepetteki birim fiyatları
+   * yeniden snapshot'la — kasiyer öncesinde Kurye fiyatıyla ekleyip sonra
+   * Gel-Al'a geçerse sepet doğru görünür kalır.
+   */
+  useEffect(() => {
+    setCart((cur) =>
+      cur.map((l) => {
+        if (l.kind === "product") {
+          const p = products.find((x) => x.id === l.productId);
+          if (!p) return l;
+          const newUnit = effProductPrice(p);
+          const extras = l.optionSummary.reduce(
+            (s, x) => s + x.additionalPrice,
+            0
+          );
+          return {
+            ...l,
+            unitPrice: newUnit,
+            lineTotal: (newUnit + extras) * l.quantity,
+          };
+        }
+        // combo
+        const c = combos.find((x) => x.id === l.comboId);
+        if (!c) return l;
+        const newUnit = effComboPrice(c);
+        return { ...l, unitPrice: newUnit, lineTotal: newUnit * l.quantity };
+      })
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderType, products, combos]);
+
   const subtotal = useMemo(
     () => cart.reduce((sum, l) => sum + l.lineTotal, 0),
     [cart]
@@ -168,9 +234,11 @@ export function DeliveryOrderScreen({
   };
 
   const pushSimpleToCart = (p: ProductDto) => {
+    const unit = effProductPrice(p);
     setCart((cur) => {
       const existing = cur.find(
         (l) =>
+          l.kind === "product" &&
           l.productId === p.id &&
           l.productOptionIds.length === 0 &&
           (l.notes ?? "") === ""
@@ -189,15 +257,16 @@ export function DeliveryOrderScreen({
       return [
         ...cur,
         {
+          kind: "product",
           key: `simple:${p.id}:${Date.now()}`,
           productId: p.id,
           productName: p.name,
-          unitPrice: p.price,
+          unitPrice: unit,
           quantity: 1,
           notes: null,
           productOptionIds: [],
           optionSummary: [],
-          lineTotal: p.price,
+          lineTotal: unit,
         },
       ];
     });
@@ -212,6 +281,7 @@ export function DeliveryOrderScreen({
    */
   const onOptionsConfirm = async (line: AddOrderItemRequest): Promise<void> => {
     if (!pendingProduct) return;
+    const unit = effProductPrice(pendingProduct);
     const summary = pendingProduct.options
       .filter((o) => line.productOptionIds.includes(o.id))
       .map((o) => ({
@@ -220,15 +290,16 @@ export function DeliveryOrderScreen({
         additionalPrice: o.additionalPrice,
       }));
     const extras = summary.reduce((s, x) => s + x.additionalPrice, 0);
-    const lineTotal = (pendingProduct.price + extras) * line.quantity;
+    const lineTotal = (unit + extras) * line.quantity;
 
     setCart((cur) => [
       ...cur,
       {
+        kind: "product",
         key: `opt:${pendingProduct.id}:${Date.now()}:${Math.random().toString(36).slice(2, 6)}`,
         productId: pendingProduct.id,
         productName: pendingProduct.name,
-        unitPrice: pendingProduct.price,
+        unitPrice: unit,
         quantity: line.quantity,
         notes: line.notes ?? null,
         productOptionIds: line.productOptionIds,
@@ -239,15 +310,84 @@ export function DeliveryOrderScreen({
     setPendingProduct(null);
   };
 
+  /**
+   * Kasiyer kampanyaya tıkladığında — varyantı olan ürünler varsa
+   * ComboOptionsDialog açılır, yoksa direkt sepete eklenir.
+   */
+  const onComboClick = (combo: ComboDto) => {
+    if (combo.items.length === 0) {
+      setActionError("Bu kampanyada ürün yok.");
+      return;
+    }
+    if (comboNeedsVariants(combo, products)) {
+      setPendingCombo(combo);
+      return;
+    }
+    pushComboToCart(combo, {});
+  };
+
+  const pushComboToCart = (
+    combo: ComboDto,
+    itemOptionSelections: Record<string, string[]>
+  ) => {
+    const unit = effComboPrice(combo);
+
+    // Notes özeti — backend'in AddComboAsync ürettiği formatla aynı.
+    const productById = new Map(products.map((p) => [p.id, p]));
+    const summaryParts = combo.items
+      .slice()
+      .sort((a, b) => a.displayOrder - b.displayOrder)
+      .map((ci) => {
+        const productName =
+          productById.get(ci.productId)?.name ?? ci.productName;
+        let part = `${ci.quantity}x ${productName}`;
+        const chosen = itemOptionSelections[ci.id];
+        if (chosen && chosen.length > 0) {
+          const product = productById.get(ci.productId);
+          const matched = product?.options
+            .filter((o) => chosen.includes(o.id) && o.isActive)
+            .sort((a, b) => a.displayOrder - b.displayOrder)
+            .map((o) => o.name);
+          if (matched && matched.length > 0)
+            part += ` (${matched.join(", ")})`;
+        }
+        return part;
+      });
+
+    setCart((cur) => [
+      ...cur,
+      {
+        kind: "combo",
+        key: `combo:${combo.id}:${Date.now()}:${Math.random().toString(36).slice(2, 6)}`,
+        comboId: combo.id,
+        comboName: combo.name,
+        unitPrice: unit,
+        quantity: 1,
+        summary: summaryParts.join(", "),
+        itemOptionSelections: Object.keys(itemOptionSelections).length
+          ? itemOptionSelections
+          : undefined,
+        lineTotal: unit,
+      },
+    ]);
+    setPendingCombo(null);
+  };
+
   const incrementLine = (key: string, delta: number) => {
     setCart((cur) =>
       cur
         .map((l) => {
           if (l.key !== key) return l;
           const q = l.quantity + delta;
-          if (q <= 0) return { ...l, quantity: 0 }; // filter aşağıda düşürür
-          const extras = l.optionSummary.reduce((s, x) => s + x.additionalPrice, 0);
-          return { ...l, quantity: q, lineTotal: (l.unitPrice + extras) * q };
+          if (q <= 0) return { ...l, quantity: 0 } as CartLine;
+          if (l.kind === "product") {
+            const extras = l.optionSummary.reduce(
+              (s, x) => s + x.additionalPrice,
+              0
+            );
+            return { ...l, quantity: q, lineTotal: (l.unitPrice + extras) * q };
+          }
+          return { ...l, quantity: q, lineTotal: l.unitPrice * q };
         })
         .filter((l) => l.quantity > 0)
     );
@@ -268,12 +408,21 @@ export function DeliveryOrderScreen({
     setBusy(true);
     setActionError(null);
     try {
-      const items: AddOrderItemRequest[] = cart.map((l) => ({
-        productId: l.productId,
-        quantity: l.quantity,
-        notes: l.notes,
-        productOptionIds: l.productOptionIds,
-      }));
+      const items: AddOrderItemRequest[] = cart
+        .filter((l): l is Extract<CartLine, { kind: "product" }> => l.kind === "product")
+        .map((l) => ({
+          productId: l.productId,
+          quantity: l.quantity,
+          notes: l.notes,
+          productOptionIds: l.productOptionIds,
+        }));
+      const combosPayload: AddComboToOrderRequest[] = cart
+        .filter((l): l is Extract<CartLine, { kind: "combo" }> => l.kind === "combo")
+        .map((l) => ({
+          comboId: l.comboId,
+          quantity: l.quantity,
+          itemOptionSelections: l.itemOptionSelections,
+        }));
       const req: CreateDeliveryOrderRequest = {
         orderType,
         customerId: customer.id,
@@ -288,6 +437,7 @@ export function DeliveryOrderScreen({
         notes: notes.trim() || null,
         discountAmount: 0,
         items,
+        combos: combosPayload.length > 0 ? combosPayload : undefined,
         incomingCallId: callId,
       };
       const created = await ordersApi.createDelivery(req);
@@ -434,9 +584,40 @@ export function DeliveryOrderScreen({
                   {c.name}
                 </Button>
               ))}
+              {combos.length > 0 && (
+                <Button
+                  size="sm"
+                  variant={selectedCat === COMBO_TAB ? "default" : "outline"}
+                  onClick={() => setSelectedCat(COMBO_TAB)}
+                >
+                  ✨ Kampanyalar
+                </Button>
+              )}
             </div>
             <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
-              {(productsByCat[selectedCat] ?? []).map((p) => {
+              {selectedCat === COMBO_TAB
+                ? combos.map((c) => (
+                    <button
+                      key={c.id}
+                      onClick={() => onComboClick(c)}
+                      disabled={busy}
+                      className={cn(
+                        "rounded-xl border bg-card p-3 text-left shadow-sm transition-all",
+                        "hover:border-primary/60 active:scale-[0.99] disabled:opacity-60"
+                      )}
+                    >
+                      <p className="font-medium">{c.name}</p>
+                      {c.description && (
+                        <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+                          {c.description}
+                        </p>
+                      )}
+                      <p className="mt-1 font-mono text-sm tabular-nums text-primary">
+                        {formatCurrency(effComboPrice(c))}
+                      </p>
+                    </button>
+                  ))
+                : (productsByCat[selectedCat] ?? []).map((p) => {
                 const hasOpts = p.options.some((o) => o.isActive);
                 return (
                   <button
@@ -450,7 +631,7 @@ export function DeliveryOrderScreen({
                   >
                     <p className="font-medium">{p.name}</p>
                     <p className="mt-1 font-mono text-sm tabular-nums text-primary">
-                      {formatCurrency(p.price)}
+                      {formatCurrency(effProductPrice(p))}
                       {hasOpts && (
                         <Badge variant="outline" className="ml-2 text-[10px]">
                           Seçenek
@@ -484,33 +665,54 @@ export function DeliveryOrderScreen({
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">{l.productName}</p>
-                  <p className="font-mono text-xs tabular-nums text-muted-foreground">
-                    {formatCurrency(l.unitPrice)} × {l.quantity}
-                  </p>
-                  {l.optionSummary.length > 0 && (
-                    <ul className="mt-1 space-y-0.5">
-                      {l.optionSummary.map((o, i) => (
-                        <li
-                          key={i}
-                          className="flex justify-between text-[11px] text-muted-foreground"
-                        >
-                          <span>
-                            {o.groupName}: {o.optionName}
-                          </span>
-                          {o.additionalPrice > 0 && (
-                            <span className="font-mono">
-                              +{formatCurrency(o.additionalPrice)}
-                            </span>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  {l.notes && (
-                    <p className="mt-1 truncate text-[11px] italic text-muted-foreground">
-                      {l.notes}
-                    </p>
+                  {l.kind === "product" ? (
+                    <>
+                      <p className="truncate text-sm font-medium">{l.productName}</p>
+                      <p className="font-mono text-xs tabular-nums text-muted-foreground">
+                        {formatCurrency(l.unitPrice)} × {l.quantity}
+                      </p>
+                      {l.optionSummary.length > 0 && (
+                        <ul className="mt-1 space-y-0.5">
+                          {l.optionSummary.map((o, i) => (
+                            <li
+                              key={i}
+                              className="flex justify-between text-[11px] text-muted-foreground"
+                            >
+                              <span>
+                                {o.groupName}: {o.optionName}
+                              </span>
+                              {o.additionalPrice > 0 && (
+                                <span className="font-mono">
+                                  +{formatCurrency(o.additionalPrice)}
+                                </span>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      {l.notes && (
+                        <p className="mt-1 truncate text-[11px] italic text-muted-foreground">
+                          {l.notes}
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-1.5">
+                        <Badge variant="secondary" className="text-[10px]">
+                          Kampanya
+                        </Badge>
+                        <p className="truncate text-sm font-medium">{l.comboName}</p>
+                      </div>
+                      <p className="font-mono text-xs tabular-nums text-muted-foreground">
+                        {formatCurrency(l.unitPrice)} × {l.quantity}
+                      </p>
+                      {l.summary && (
+                        <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">
+                          {l.summary}
+                        </p>
+                      )}
+                    </>
                   )}
                   <p className="mt-1 font-mono text-sm font-semibold tabular-nums text-foreground">
                     {formatCurrency(l.lineTotal)}
@@ -582,6 +784,17 @@ export function DeliveryOrderScreen({
           product={pendingProduct}
           onClose={() => setPendingProduct(null)}
           onConfirm={onOptionsConfirm}
+        />
+      )}
+
+      {pendingCombo && (
+        <ComboOptionsDialog
+          combo={pendingCombo}
+          products={products}
+          onClose={() => setPendingCombo(null)}
+          onConfirm={(selections) =>
+            pushComboToCart(pendingCombo, selections)
+          }
         />
       )}
     </div>
