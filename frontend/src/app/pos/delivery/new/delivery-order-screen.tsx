@@ -406,14 +406,9 @@ export function DeliveryOrderScreen({
         orderType === "Delivery"
           ? `/print/courier-slip/${created.id}`
           : `/print/receipt/${created.id}`;
-      // Kasada (Electron) sessiz baskı: yeni sekme / print önizleme yok,
-      // doğrudan termal yazıcıya basar. Kasiyer kasaya geri döner.
-      if (typeof window !== "undefined" && window.printer) {
-        void window.printer.print(printPath);
-        router.push("/pos");
-      } else {
-        router.push(printPath);
-      }
+      // Print sayfasına yönlendir — Windows yazıcı dialog'u otomatik açılır.
+      // Silent baskı kaldırıldı (termal sürücüsü blank veriyordu).
+      router.push(printPath);
     } catch (err) {
       setActionError(describeError(err));
     } finally {

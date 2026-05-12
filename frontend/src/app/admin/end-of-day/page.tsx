@@ -55,28 +55,9 @@ export default function EndOfDayPage() {
 
   const onPrint = async () => {
     setPrintError(null);
-    const url = `/print/end-of-day/${date}`;
-    // Electron (kasa) içinde window.printer expose edilir — yazıcı seçim
-    // diyalogu olmadan doğrudan termal yazıcıya basar.
-    if (typeof window !== "undefined" && window.printer) {
-      setPrinting(true);
-      try {
-        const res = await window.printer.print(url);
-        if (!res.ok) {
-          setPrintError(`Yazdırma başarısız: ${res.reason ?? "bilinmeyen hata"}. Yeni sekme açılıyor.`);
-          window.open(url, "_blank");
-        }
-      } catch (err) {
-        setPrintError(`Yazıcı hatası: ${(err as Error).message}. Yeni sekme açılıyor.`);
-        window.open(url, "_blank");
-      } finally {
-        setPrinting(false);
-      }
-      return;
-    }
-    // Web ortamı (Vercel admin paneli) — eski davranış, tarayıcının
-    // yazdır diyalogu çıkar.
-    window.open(url, "_blank");
+    // Yeni sekmede aç → sayfa window.print() çağırır → Windows yazıcı
+    // dialog'u açılır → kasiyer yazıcı seçip "Yazdır" basar.
+    window.open(`/print/end-of-day/${date}`, "_blank");
   };
 
   return (

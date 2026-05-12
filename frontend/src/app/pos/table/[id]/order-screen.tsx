@@ -290,16 +290,11 @@ export function OrderScreen({ tableId }: Props) {
     setActionError(null);
     try {
       await api.post(`/api/orders/${order.id}/complete`, req, storeId);
-      // Kasada (Electron) sessiz baskı arka planda fırlat — kasiyer ayrı
-      // sekmede print önizleme bekleme rolünden kurtulur, doğrudan masalara
-      // döner. Web (Vercel admin) ortamında window.printer undefined →
-      // eski davranış (yeni sekmede print preview).
-      if (typeof window !== "undefined" && window.printer) {
-        void window.printer.print(`/print/receipt/${order.id}`);
-        router.push("/pos");
-      } else {
-        router.push(`/print/receipt/${order.id}`);
-      }
+      // Print sayfasına yönlendir — sayfa açılınca window.print() otomatik
+      // Windows yazıcı dialog'u açar, kasiyer yazıcı seçip "Yazdır" basar.
+      // Silent baskı kaldırıldı (termal sürücüsü pageSize/margin uyumsuzluğu
+      // yüzünden blank kağıt veriyordu).
+      router.push(`/print/receipt/${order.id}`);
       router.refresh();
     } catch (err) {
       setActionError(describeError(err));
