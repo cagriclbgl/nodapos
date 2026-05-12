@@ -40,10 +40,13 @@ public class ComboService : IComboService
     public async Task<ComboDto> CreateAsync(CreateComboRequest request, CancellationToken ct = default)
     {
         ValidateBasics(request.Name, request.Price, request.DeliveryPrice);
-        if (request.Items is null || request.Items.Count == 0)
-            throw new DomainException("Kombo en az bir ürün içermeli.");
 
-        await EnsureProductsExist(request.Items, ct);
+        // Boş combo (ürünsüz) oluşturmaya izin var — yönetici sonra
+        // doldurabilsin. Kasiyer boş combo'yu sepete eklemeye çalışırsa
+        // OrderService.AddComboAsync "Kombo X boş" hatası verir.
+        var items = request.Items ?? Array.Empty<CreateComboItemRequest>();
+        if (items.Count > 0)
+            await EnsureProductsExist(items, ct);
 
         var combo = new Combo
         {
@@ -56,7 +59,7 @@ public class ComboService : IComboService
         };
         _db.Combos.Add(combo);
 
-        foreach (var item in request.Items)
+        foreach (var item in items)
         {
             _db.ComboItems.Add(new ComboItem
             {
@@ -78,10 +81,12 @@ public class ComboService : IComboService
             ?? throw DomainException.NotFound("Kombo");
 
         ValidateBasics(request.Name, request.Price, request.DeliveryPrice);
-        if (request.Items is null || request.Items.Count == 0)
-            throw new DomainException("Kombo en az bir ürün içermeli.");
 
-        await EnsureProductsExist(request.Items, ct);
+        // Boş combo update'e izin var — yönetici tüm ürünleri silebilir.
+        // Kasiyer sepete eklemeye çalışırsa OrderService "Kombo X boş" verir.
+        var items = request.Items ?? Array.Empty<CreateComboItemRequest>();
+        if (items.Count > 0)
+            await EnsureProductsExist(items, ct);
 
         combo.Name = request.Name.Trim();
         combo.Description = NullIfBlank(request.Description);
@@ -97,7 +102,7 @@ public class ComboService : IComboService
         _db.ComboItems.RemoveRange(combo.Items);
         await _db.SaveChangesAsync(ct);
 
-        foreach (var item in request.Items)
+        foreach (var item in items)
         {
             _db.ComboItems.Add(new ComboItem
             {

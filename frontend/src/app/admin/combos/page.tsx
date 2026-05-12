@@ -185,10 +185,8 @@ export default function CombosPage() {
       setFormError("Fiyat negatif olamaz.");
       return;
     }
-    if (draft.items.length === 0) {
-      setFormError("En az bir ürün eklemelisin.");
-      return;
-    }
+    // Ürün listesi opsiyonel — yönetici taslak olarak boş combo kaydedebilir,
+    // sonra düzenleyip doldurabilir. Kasiyer boş combo'yu seçemez.
     setBusy(true);
     setFormError(null);
     try {
