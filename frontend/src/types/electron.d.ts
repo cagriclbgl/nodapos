@@ -8,20 +8,22 @@
 
 import type { IncomingCallDto } from "./api";
 
-export interface CallerIdRawPayload {
-  hex: string;
-}
-
 export type CallerIdStatusPayload =
   | { kind: "disconnected"; reason?: string }
-  | { kind: "searching" }
+  | { kind: "searching"; reason?: string }
   | {
       kind: "connected";
       product?: string;
       manufacturer?: string;
       serial?: string;
-    }
-  | { kind: "test-mode" };
+      signals?: number[];
+    };
+
+export interface CallerIdSignalsPayload {
+  model?: string;
+  serial?: string;
+  signals: number[];
+}
 
 /**
  * Backend kayıt başarılıysa tam IncomingCallDto, başarısızsa minimal fallback
@@ -36,24 +38,20 @@ export type CallerIdCallPayload =
       receivedAt: string;
     };
 
-export interface CallerIdHidDeviceInfo {
-  vendorId?: number;
-  productId?: number;
-  product?: string;
-  manufacturer?: string;
-  serialNumber?: string;
-  path?: string;
-  usagePage?: number;
-  usage?: number;
+export interface CallerIdBridgeStatus {
+  loaded: boolean;
+  connected: boolean;
+  model?: string;
+  serial?: string;
+  signals?: number[];
+  reason?: string;
 }
 
 export interface CallerIdBridge {
   onCall(cb: (payload: CallerIdCallPayload) => void): () => void;
-  onRaw(cb: (payload: CallerIdRawPayload) => void): () => void;
   onStatus(cb: (payload: CallerIdStatusPayload) => void): () => void;
-  rescan(): Promise<{ ok: boolean }>;
-  listDevices(): Promise<CallerIdHidDeviceInfo[]>;
-  setTestMode(active: boolean): Promise<{ ok: boolean }>;
+  onSignals(cb: (payload: CallerIdSignalsPayload) => void): () => void;
+  getStatus(): Promise<CallerIdBridgeStatus>;
 }
 
 /**

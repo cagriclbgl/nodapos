@@ -3,11 +3,12 @@ import { contextBridge, ipcRenderer } from "electron";
 /**
  * Renderer'a açılan minimal API. Caller ID için tek yönlü pub-sub:
  *   - onCall(cb): main -> renderer çağrı eventi (matched customer + recent orders)
- *   - onRaw(cb): main -> renderer ham hex (yalnızca test paneli aktifken)
- *   - onStatus(cb): main -> renderer cihaz durumu (connected/disconnected/...)
- *   - rescan(): renderer -> main "yeniden tara" tetikler
- *   - listDevices(): renderer -> main mevcut HID cihaz listesini ister
- *   - setTestMode(active): renderer -> main test paneli aç/kapa
+ *   - onStatus(cb): main -> renderer cihaz durumu (connected/searching/disconnected)
+ *   - onSignals(cb): main -> renderer 4-hat sinyal seviyeleri (ayar paneli bar)
+ *   - getStatus(): renderer -> main mevcut durum snapshot'ı
+ *
+ * Eski HID listener (onRaw/rescan/listDevices/setTestMode) v0.1.20'da kaldırıldı —
+ * Cidshow cid.dll v9 (vendor SDK) USB enumerate + FSK decode'u içeride yapıyor.
  */
 contextBridge.exposeInMainWorld("app", {
   version: process.env.npm_package_version ?? "0.1.0",
@@ -16,11 +17,9 @@ contextBridge.exposeInMainWorld("app", {
 
 const CHANNELS = {
   CALL: "caller-id:call",
-  RAW: "caller-id:raw",
   STATUS: "caller-id:status",
-  RESCAN: "caller-id:rescan",
-  LIST_DEVICES: "caller-id:list-devices",
-  SET_TEST_MODE: "caller-id:set-test-mode",
+  SIGNALS: "caller-id:signals",
+  GET_STATUS: "caller-id:get-status",
 } as const;
 
 /**
@@ -42,18 +41,16 @@ contextBridge.exposeInMainWorld("callerId", {
     ipcRenderer.on(CHANNELS.CALL, handler);
     return () => ipcRenderer.removeListener(CHANNELS.CALL, handler);
   },
-  onRaw: (cb: (payload: { hex: string }) => void) => {
-    const handler = (_e: unknown, payload: { hex: string }) => cb(payload);
-    ipcRenderer.on(CHANNELS.RAW, handler);
-    return () => ipcRenderer.removeListener(CHANNELS.RAW, handler);
-  },
   onStatus: (cb: (payload: unknown) => void) => {
     const handler = (_e: unknown, payload: unknown) => cb(payload);
     ipcRenderer.on(CHANNELS.STATUS, handler);
     return () => ipcRenderer.removeListener(CHANNELS.STATUS, handler);
   },
-  rescan: () => ipcRenderer.invoke(CHANNELS.RESCAN),
-  listDevices: () => ipcRenderer.invoke(CHANNELS.LIST_DEVICES),
-  setTestMode: (active: boolean) =>
-    ipcRenderer.invoke(CHANNELS.SET_TEST_MODE, active),
+  onSignals: (cb: (payload: { model?: string; serial?: string; signals: number[] }) => void) => {
+    const handler = (_e: unknown, payload: { model?: string; serial?: string; signals: number[] }) =>
+      cb(payload);
+    ipcRenderer.on(CHANNELS.SIGNALS, handler);
+    return () => ipcRenderer.removeListener(CHANNELS.SIGNALS, handler);
+  },
+  getStatus: () => ipcRenderer.invoke(CHANNELS.GET_STATUS),
 });

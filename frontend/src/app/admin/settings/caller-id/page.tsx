@@ -6,39 +6,31 @@ import {
   Cable,
   RefreshCw,
   XCircle,
-  Search,
-  TestTube,
+  PhoneIncoming,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui-v2/card";
-import { Button } from "@/components/ui-v2/button";
 import { Badge } from "@/components/ui-v2/badge";
 import { Separator } from "@/components/ui-v2/separator";
 import type {
-  CallerIdHidDeviceInfo,
+  CallerIdSignalsPayload,
   CallerIdStatusPayload,
 } from "@/types/electron";
-
-const TARGET_VID = 0x1a86;
-const TARGET_PID = 0xe008;
 
 /**
  * Caller ID ayar paneli — Manager only.
  *
- *  - Cihaz durumu (bağlandı/bulunamadı) canlı; status IPC üzerinden gelir
- *  - Yeniden tara / cihaz listesini göster
- *  - Test modu: gelen ham HID raporlarını canlı listele (parser geliştirme için)
+ * v0.1.20 itibarıyla cihaz iletişimi Cidshow vendor SDK `cid.dll` v9 üzerinden.
+ * USB enumerate + FSK decode + numara parse DLL içinde — kasada sadece şunlar
+ * görünür: cihaz model/seri/bağlantı + her hattın canlı sinyal seviyesi.
  *
- * Web (Vercel) tarafında window.callerId undefined; bu sayfa "kasa Electron'unda
- * açılmalı" uyarısı gösterir ama yine erişilebilir kalır.
+ * Eski HID listener + ham frame test paneli + kayıt cihazı kaldırıldı.
  */
 export default function CallerIdSettingsPage() {
   const [bridgeAvailable, setBridgeAvailable] = useState(false);
   const [status, setStatus] = useState<CallerIdStatusPayload>({
     kind: "disconnected",
   });
-  const [devices, setDevices] = useState<CallerIdHidDeviceInfo[] | null>(null);
-  const [testMode, setTestMode] = useState(false);
-  const [rawLog, setRawLog] = useState<string[]>([]);
+  const [signals, setSignals] = useState<CallerIdSignalsPayload | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -48,45 +40,20 @@ export default function CallerIdSettingsPage() {
   useEffect(() => {
     if (typeof window === "undefined" || !window.callerId) return;
     const offStatus = window.callerId.onStatus((s) => setStatus(s));
-    const offRaw = window.callerId.onRaw((p) => {
-      setRawLog((cur) =>
-        [`[${new Date().toLocaleTimeString("tr-TR")}] ${p.hex}`, ...cur].slice(
-          0,
-          50
-        )
-      );
-    });
+    const offSignals = window.callerId.onSignals((p) => setSignals(p));
     return () => {
       offStatus();
-      offRaw();
+      offSignals();
     };
   }, []);
-
-  const rescan = async () => {
-    if (!window.callerId) return;
-    await window.callerId.rescan();
-  };
-
-  const listDevices = async () => {
-    if (!window.callerId) return;
-    setDevices(await window.callerId.listDevices());
-  };
-
-  const toggleTestMode = async () => {
-    if (!window.callerId) return;
-    const next = !testMode;
-    await window.callerId.setTestMode(next);
-    setTestMode(next);
-    if (!next) setRawLog([]);
-  };
 
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-bold">Caller ID Ayarları</h2>
         <p className="text-sm text-muted-foreground">
-          USB HID Caller ID kutusu (VID 0x{TARGET_VID.toString(16)} PID 0x
-          {TARGET_PID.toString(16)}) — kasada bağlı, ek sürücü gerekmez.
+          Cidshow C812A/C814A USB Caller ID kutusu — vendor SDK ile entegre. Ek
+          sürücü/yapılandırma gerekmez, otomatik tanınır.
         </p>
       </div>
 
@@ -111,124 +78,60 @@ export default function CallerIdSettingsPage() {
           {status.kind === "connected" && (
             <dl className="grid grid-cols-[120px_1fr] gap-y-1 text-sm">
               <dt className="text-muted-foreground">Üretici</dt>
-              <dd>{status.manufacturer ?? "—"}</dd>
-              <dt className="text-muted-foreground">Ürün</dt>
+              <dd>{status.manufacturer ?? "Cidshow.com"}</dd>
+              <dt className="text-muted-foreground">Model</dt>
               <dd>{status.product ?? "—"}</dd>
               <dt className="text-muted-foreground">Seri No</dt>
               <dd>{status.serial ?? "—"}</dd>
             </dl>
           )}
-          {status.kind === "disconnected" && status.reason && (
-            <p className="text-xs text-muted-foreground">{status.reason}</p>
-          )}
-          <Separator />
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant="outline"
-              onClick={() => void rescan()}
-              disabled={!bridgeAvailable}
-            >
-              <RefreshCw /> Yeniden Tara
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => void listDevices()}
-              disabled={!bridgeAvailable}
-            >
-              <Search /> Tüm HID Cihazları Listele
-            </Button>
-          </div>
+          {(status.kind === "disconnected" || status.kind === "searching") &&
+            status.reason && (
+              <p className="text-xs text-muted-foreground">{status.reason}</p>
+            )}
         </CardContent>
       </Card>
 
-      {/* Cihaz listesi */}
-      {devices && (
-        <Card>
-          <CardHeader>
-            <CardTitle>HID Cihaz Listesi ({devices.length})</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {devices.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                Hiç HID cihazı bulunamadı.
-              </p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[640px] text-xs">
-                  <thead>
-                    <tr className="border-b text-left text-muted-foreground">
-                      <th className="py-1">VID:PID</th>
-                      <th className="py-1">Üretici</th>
-                      <th className="py-1">Ürün</th>
-                      <th className="py-1">Seri</th>
-                      <th className="py-1">Usage</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {devices.map((d, i) => {
-                      const target =
-                        d.vendorId === TARGET_VID && d.productId === TARGET_PID;
-                      return (
-                        <tr
-                          key={`${d.path ?? i}`}
-                          className={target ? "bg-primary/5" : ""}
-                        >
-                          <td className="py-1 font-mono">
-                            {target && "★ "}
-                            {d.vendorId?.toString(16).padStart(4, "0")}:
-                            {d.productId?.toString(16).padStart(4, "0")}
-                          </td>
-                          <td className="py-1">{d.manufacturer ?? "—"}</td>
-                          <td className="py-1">{d.product ?? "—"}</td>
-                          <td className="py-1">{d.serialNumber ?? "—"}</td>
-                          <td className="py-1 font-mono">
-                            {d.usagePage}/{d.usage}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Test modu */}
+      {/* Sinyal seviyeleri */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <TestTube className="h-5 w-5" /> Protokol Test Modu
+            <PhoneIncoming className="h-5 w-5" /> Hat Sinyalleri
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="text-sm text-muted-foreground">
-            Açıkken, cihazdan gelen tüm ham HID raporları aşağıda canlı görünür.
-            Parser geliştirilirken kullanılır — sıradan kullanımda kapalı tutun.
+            Her hat için canlı sinyal seviyesi (0-100). Cihaz takılı ve hatta
+            kablo bağlıysa 50+ olmalı. Çağrı sırasında dalgalanma normaldir.
+            Kullanılmayan hatlar 0&apos;da kalır.
           </p>
-          <Button
-            variant={testMode ? "default" : "outline"}
-            onClick={() => void toggleTestMode()}
-            disabled={!bridgeAvailable}
-          >
-            {testMode ? "Test Modunu Kapat" : "Test Modunu Aç"}
-          </Button>
-          {testMode && (
-            <div className="max-h-72 overflow-y-auto rounded-lg border bg-black/5 p-2 font-mono text-[11px] dark:bg-white/5">
-              {rawLog.length === 0 ? (
-                <p className="text-muted-foreground">
-                  Henüz veri yok. Bir hattan arayın.
-                </p>
-              ) : (
-                rawLog.map((line, i) => (
-                  <div key={i} className="leading-relaxed">
-                    {line}
+          <div className="space-y-2">
+            {[0, 1, 2, 3].map((idx) => {
+              const value = signals?.signals?.[idx] ?? 0;
+              const used = value > 0;
+              return (
+                <div key={idx} className="space-y-1">
+                  <div className="flex justify-between text-xs">
+                    <span className={used ? "font-medium" : "text-muted-foreground"}>
+                      Hat {idx + 1}
+                    </span>
+                    <span className="font-mono">{value}</span>
                   </div>
-                ))
-              )}
-            </div>
-          )}
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                    <div
+                      className="h-full bg-primary transition-all duration-200"
+                      style={{ width: `${Math.min(100, Math.max(0, value))}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <Separator />
+          <p className="text-xs text-muted-foreground">
+            DLL Durumu: <span className="font-mono">{status.kind}</span>
+            {signals === null && bridgeAvailable && " · sinyal bekleniyor..."}
+          </p>
         </CardContent>
       </Card>
     </div>
@@ -246,13 +149,7 @@ function StatusBadge({ status }: { status: CallerIdStatusPayload }) {
     case "searching":
       return (
         <Badge variant="secondary" className="gap-1">
-          <RefreshCw className="h-3 w-3 animate-spin" /> Aranıyor…
-        </Badge>
-      );
-    case "test-mode":
-      return (
-        <Badge variant="outline" className="gap-1">
-          <TestTube className="h-3 w-3" /> Test modunda
+          <RefreshCw className="h-3 w-3 animate-spin" /> Cihaz bekleniyor…
         </Badge>
       );
     case "disconnected":

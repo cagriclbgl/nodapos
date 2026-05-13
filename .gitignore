@@ -76,3 +76,4 @@ logs/
 *.db-journal
 *.sqlite
 *.sqlite3
+.cidshow-sdk/

@@ -6,30 +6,89 @@ import * as crypto from "crypto";
 import getPort from "get-port";
 import waitOn from "wait-on";
 import { autoUpdater } from "electron-updater";
-import { CallerIdListener } from "./hid/caller-id-listener";
-import { IncomingCallBridge } from "./services/incoming-call-bridge";
+import { CidshowBridge } from "./services/cidshow-bridge";
 import { CLOUD_API_BASE_URL, HMAC_SECRET } from "./config";
 
 let apiProcess: ChildProcess | null = null;
 let frontendProcess: ChildProcess | null = null;
 let mainWindow: BrowserWindow | null = null;
 let logStream: fs.WriteStream | null = null;
+let callerIdLogStream: fs.WriteStream | null = null;
 let apiCrashCount = 0;
 let frontendCrashCount = 0;
-let callerIdListener: CallerIdListener | null = null;
+let cidshowBridge: CidshowBridge | null = null;
 let activeFrontendPort: number = 3000;
 const MAX_CRASHES = 3;
+
+/** Açılışta rotate edilen log dosyaları için boyut sınırı. */
+const LOG_MAX_BYTES = 20 * 1024 * 1024;
 
 function log(msg: string) {
   const line = `[${new Date().toISOString()}] ${msg}\n`;
   process.stdout.write(line);
+  // Cidshow diagnostic'i ayrı dosyaya — 4 GB sync spam'ı içinde aramak yerine
+  // /admin/settings/caller-id sayfasında neyi göstereceksek doğrudan oradan okunur.
+  if (msg.startsWith("[cidshow]")) {
+    callerIdLogStream?.write(line);
+  }
   logStream?.write(line);
+}
+
+/**
+ * .NET API ve Next.js standalone child process'leri stdout'unda dakikada
+ * yüzlerce `info: ...` satır üretiyor (HTTP istek log'ları, sync polling).
+ * Bu spam log dosyasını 2 günde GB'lara şişiriyor. Açılışta filtre uygula:
+ * sadece warn/error/cidshow/main satırlarını disk'e yaz.
+ */
+function shouldKeepLine(msg: string): boolean {
+  // Kendi log'larımız (cidshow, main, updater) ve API/frontend warn+error
+  // her zaman tutulur. info:/dbug:/trce: gibi gevşek seviyeler filtrelenir.
+  if (msg.startsWith("[cidshow]") || msg.startsWith("[updater]") || msg.startsWith("[print]")) {
+    return true;
+  }
+  if (msg.startsWith("[api-out]") || msg.startsWith("[front-out]")) {
+    const lower = msg.toLowerCase();
+    // .NET Microsoft.Extensions.Logging seviye prefix'leri:
+    //   "info:" / "dbug:" / "trce:" → filtrele
+    //   "warn:" / "fail:" / "crit:" → tut
+    // Next.js: hata satırları "error" içerir.
+    if (lower.includes("info:") || lower.includes("dbug:") || lower.includes("trce:")) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Açılışta log dosyalarını kontrol et:
+ *  - Dosya > LOG_MAX_BYTES ise `.1` olarak rotate et (eski `.1` silinir).
+ *  - Yeni oturum başlangıç satırı yaz.
+ *
+ * v0.1.22 öncesi log rotation yoktu → 2 günde 4 GB. Sistemler bu durumda
+ * çökmüyordu ama destek kişisi log'a baktığında PowerShell donuyordu.
+ */
+function rotateIfTooLarge(filePath: string): void {
+  try {
+    if (!fs.existsSync(filePath)) return;
+    const stat = fs.statSync(filePath);
+    if (stat.size <= LOG_MAX_BYTES) return;
+    const backup = filePath + ".1";
+    if (fs.existsSync(backup)) fs.unlinkSync(backup);
+    fs.renameSync(filePath, backup);
+  } catch {
+    /* rotate hatasi engelleyici degil */
+  }
 }
 
 function ensureLog() {
   const logsDir = path.join(app.getPath("userData"), "logs");
   fs.mkdirSync(logsDir, { recursive: true });
-  logStream = fs.createWriteStream(path.join(logsDir, "main.log"), { flags: "a" });
+  const mainLogPath = path.join(logsDir, "main.log");
+  const callerIdLogPath = path.join(logsDir, "caller-id.log");
+  rotateIfTooLarge(mainLogPath);
+  rotateIfTooLarge(callerIdLogPath);
+  logStream = fs.createWriteStream(mainLogPath, { flags: "a" });
+  callerIdLogStream = fs.createWriteStream(callerIdLogPath, { flags: "a" });
 }
 
 function getOrCreateJwtSecret(): string {
@@ -96,7 +155,15 @@ async function startApi(): Promise<number> {
     stdio: ["ignore", "pipe", "pipe"],
   });
 
-  apiProcess.stdout?.on("data", (d) => log(`[api-out] ${d.toString().trim()}`));
+  // stdout her satırı `log()`'a göndermek 4GB log büyümesinin sebebiydi —
+  // shouldKeepLine ile `info:` spam'ını filtrele, sadece anlamlı olanları yaz.
+  apiProcess.stdout?.on("data", (d) => {
+    for (const ln of d.toString().split(/\r?\n/)) {
+      if (!ln.trim()) continue;
+      const msg = `[api-out] ${ln.trim()}`;
+      if (shouldKeepLine(msg)) log(msg);
+    }
+  });
   apiProcess.stderr?.on("data", (d) => log(`[api-err] ${d.toString().trim()}`));
   apiProcess.on("exit", (code) => {
     log(`API exited with code ${code}`);
@@ -160,9 +227,13 @@ async function startFrontend(apiPort: number): Promise<number> {
     stdio: ["ignore", "pipe", "pipe"],
   });
 
-  frontendProcess.stdout?.on("data", (d) =>
-    log(`[front-out] ${d.toString().trim()}`)
-  );
+  frontendProcess.stdout?.on("data", (d) => {
+    for (const ln of d.toString().split(/\r?\n/)) {
+      if (!ln.trim()) continue;
+      const msg = `[front-out] ${ln.trim()}`;
+      if (shouldKeepLine(msg)) log(msg);
+    }
+  });
   frontendProcess.stderr?.on("data", (d) =>
     log(`[front-err] ${d.toString().trim()}`)
   );
@@ -217,38 +288,30 @@ async function createWindow(frontendPort: number) {
  * Pencere oluştuktan SONRA başlatılır — IPC broadcast yapılırken en az bir
  * BrowserWindow olması, ilk eventlerin kaybolmamasını garanti eder.
  */
-function startCallerIdListener(apiPort: number): void {
-  if (callerIdListener) return;
+/**
+ * Cidshow C812A/C814A Caller ID köprüsünü başlat.
+ *
+ * `cid.dll` (vendor SDK) USB enumerate + FSK decode + numara parse'ı yapıyor.
+ * Biz sadece SetEvents() callback'lerini bağlıyoruz. Eski node-hid listener'ı
+ * tamamen devre dışı — DLL USB cihazı exclusive açar, ikisini eşzamanlı
+ * çalıştırılamaz.
+ *
+ * DLL yüklenemezse bridge.start() false döner; kasa Caller ID olmadan açılır,
+ * sipariş alma akışı etkilenmez.
+ */
+function startCidshowBridge(apiPort: number): void {
+  if (cidshowBridge) return;
   const apiBaseUrl = `http://127.0.0.1:${apiPort}`;
-  const listener = new CallerIdListener({ log });
-  const bridge = new IncomingCallBridge(listener, { apiBaseUrl, log });
-  bridge.install();
+  const bridge = new CidshowBridge({ apiBaseUrl, log });
+  const ok = bridge.start();
+  if (!ok) {
+    log("[main] Cidshow bridge başlatılamadı — kasa Caller ID devre dışı");
+  }
+  cidshowBridge = bridge;
 
-  ipcMain.handle("caller-id:rescan", () => {
-    listener.rescan();
-    return { ok: true };
-  });
-  ipcMain.handle("caller-id:list-devices", async () => {
-    const devices = await listener.listAllDevices();
-    // Native HID nesneleri JSON-serializable değil — sadece güvenli alanları gönder.
-    return devices.map((d) => ({
-      vendorId: d.vendorId,
-      productId: d.productId,
-      product: d.product,
-      manufacturer: d.manufacturer,
-      serialNumber: d.serialNumber,
-      path: d.path,
-      usagePage: d.usagePage,
-      usage: d.usage,
-    }));
-  });
-  ipcMain.handle("caller-id:set-test-mode", (_e, active: boolean) => {
-    listener.setTestMode(active);
-    return { ok: true };
-  });
-
-  listener.start();
-  callerIdListener = listener;
+  // Ayar paneli için: status + sinyal sorgu IPC'leri (rescan/list-devices/
+  // test-mode artık anlamsız — DLL hepsini içeride yönetiyor).
+  ipcMain.handle("caller-id:get-status", () => bridge.getStatus());
 }
 
 /**
@@ -472,8 +535,9 @@ app.whenReady().then(async () => {
     }
     activeFrontendPort = frontendPort;
     await createWindow(frontendPort);
-    // Caller ID listener pencere açıldıktan SONRA — IPC broadcast'ı için.
-    startCallerIdListener(apiPort);
+    // Cidshow bridge pencere açıldıktan SONRA — DLL signal callback'i ilk
+    // pencere kayıt olunca status IPC broadcast'ını alabilsin.
+    startCidshowBridge(apiPort);
     // Auto-update arka planda — basarisiz olsa bile kasayi engellemesin.
     setupAutoUpdater();
   } catch (err) {
@@ -484,14 +548,10 @@ app.whenReady().then(async () => {
 });
 
 app.on("before-quit", () => {
-  if (callerIdListener) {
-    try {
-      callerIdListener.stop();
-    } catch {
-      /* ignore */
-    }
-    callerIdListener = null;
-  }
+  // DLL'in açık unregister API'si yok — process kapanışında işletim sistemi
+  // DLL'i unload eder, kayıtlı callback'ler de düşer. Yine de referansı
+  // null'la ki re-init'te (geliştirme reload) eski callback ref'leri kalmasın.
+  cidshowBridge = null;
   for (const [name, child] of [
     ["frontend", frontendProcess],
     ["api", apiProcess],

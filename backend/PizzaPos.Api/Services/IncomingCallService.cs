@@ -37,9 +37,12 @@ public class IncomingCallService : IIncomingCallService
         var phone = NormalizePhone(request.Phone);
         var receivedAt = request.ReceivedAt ?? DateTime.UtcNow;
 
-        // Numarayı bilinen müşteriyle eşleştir. Customer.Phone formatları
-        // arasında küçük tutarsızlıklar olabileceği için hem normalize edilmiş
-        // hem de orijinal formla aynı anda eşleştirme dener.
+        // Numarayı bilinen müşteriyle eşleştir. Match stratejisi:
+        //  1. Exact: c.Phone == phone (yeni v0.1.22+ kayıtlar zaten normalize)
+        //  2. Tail EndsWith: bozuk formattaki son 7 hane LIKE (eski ILike yerine)
+        //  3. In-memory: yine bulunamadıysa tüm müşterileri çek, c.Phone'u normalize
+        //     ederek match dene (mevcut "+90 545 516 33 83" gibi boşluklu kayıtlar
+        //     için son güvenlik ağı). Tipik restoranda <1000 müşteri, perf sorun değil.
         Customer? matched = null;
         if (!string.IsNullOrWhiteSpace(phone))
         {
@@ -49,12 +52,29 @@ public class IncomingCallService : IIncomingCallService
 
             if (matched is null)
             {
-                // Telefon formatı tutarsızsa son 7 hane match'i (örn: +905551234567 vs 5551234567).
                 var tail = phone.Length >= 7 ? phone[^7..] : phone;
                 matched = await _db.Customers
                     .Include(c => c.Addresses)
-                    .Where(c => EF.Functions.ILike(c.Phone, "%" + tail))
+                    .Where(c => c.Phone.EndsWith(tail))
                     .FirstOrDefaultAsync(ct);
+            }
+
+            if (matched is null)
+            {
+                // Son fallback: tüm müşterileri çek, in-memory normalize ile karşılaştır.
+                // Pre-v0.1.22 kaydedilmiş "+90 545 516 33 83" gibi boşluklu kayıtları
+                // kurtarır (DB taraf normalize-on-save eklendi ama eski kayıtlar bozuk).
+                var allCustomers = await _db.Customers
+                    .Include(c => c.Addresses)
+                    .ToListAsync(ct);
+                var tail = phone.Length >= 7 ? phone[^7..] : phone;
+                matched = allCustomers.FirstOrDefault(c =>
+                {
+                    var normalized = NormalizePhone(c.Phone);
+                    if (normalized is null) return false;
+                    if (normalized == phone) return true;
+                    return normalized.EndsWith(tail);
+                });
             }
         }
 

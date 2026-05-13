@@ -29,12 +29,14 @@ public class CustomerService : ICustomerService
         if (hasSearch)
         {
             var term = search!.Trim();
-            // EF.Functions.ILike → Postgres ILIKE; SQLite tarafinda EF Core
-            // bunu case-sensitive LIKE'a duser, kasada da makul fallback.
-            var pattern = $"%{term}%";
+            var termLower = term.ToLower();
+            // Provider-agnostic case-insensitive search. EF.Functions.ILike Npgsql
+            // extension'ı SQLite'da runtime'da fırlatır (eski yorum yanlıştı, kasada
+            // 500 atıyordu); ToLower().Contains hem Postgres hem SQLite'da LOWER()
+            // SQL function'una çevrilir. Telefon zaten rakam, lowercase'i kendine eşit.
             query = query.Where(c =>
-                EF.Functions.ILike(c.Name, pattern) ||
-                EF.Functions.ILike(c.Phone, pattern));
+                c.Name.ToLower().Contains(termLower) ||
+                c.Phone.Contains(term));
         }
 
         // Project + correlated subqueries so OrderCount/LastOrderAt are computed
@@ -73,7 +75,10 @@ public class CustomerService : ICustomerService
     public async Task<CustomerDto> CreateAsync(CreateCustomerRequest request, CancellationToken ct = default)
     {
         var name = NormalizeRequired(request.Name, "Name");
-        var phone = NormalizeRequired(request.Phone, "Phone");
+        // Telefon DIGITS-ONLY normalize: Caller ID DLL ham digits gönderir
+        // ("05455163383"), user form'da "+90 545 516 33 83" yazmış olabilir.
+        // İkisini de aynı kurala soktuğumuz için match çalışır.
+        var phone = NormalizePhoneRequired(request.Phone);
         var notes = string.IsNullOrWhiteSpace(request.Notes) ? null : request.Notes.Trim();
 
         if (!_tenant.HasTenant)
@@ -122,7 +127,7 @@ public class CustomerService : ICustomerService
 
         if (request.Phone is not null)
         {
-            var newPhone = NormalizeRequired(request.Phone, "Phone");
+            var newPhone = NormalizePhoneRequired(request.Phone);
             if (newPhone != customer.Phone)
             {
                 var dup = await _db.Customers.AnyAsync(c => c.Id != customer.Id && c.Phone == newPhone, ct);
@@ -321,8 +326,30 @@ public class CustomerService : ICustomerService
     {
         if (string.IsNullOrWhiteSpace(raw))
             throw new DomainException($"{fieldName} is required.");
-        // Collapse whitespace edges; do NOT auto-format the phone number.
         return raw.Trim();
+    }
+
+    /// <summary>
+    /// Telefonu digits-only normalize (sadece rakam + baştaki + işareti). Caller ID
+    /// DLL "05455163383" yollar, kullanıcı form'a "+90 545 516 33 83" yazabilir;
+    /// her ikisini de aynı canonical formata düşürürsek match deterministik olur.
+    /// IncomingCallService.NormalizePhone ile aynı algoritma.
+    /// </summary>
+    private static string NormalizePhoneRequired(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            throw new DomainException("Phone is required.");
+        var trimmed = raw.Trim();
+        var sb = new System.Text.StringBuilder(trimmed.Length);
+        for (int i = 0; i < trimmed.Length; i++)
+        {
+            var c = trimmed[i];
+            if (i == 0 && c == '+') sb.Append('+');
+            else if (char.IsDigit(c)) sb.Append(c);
+        }
+        if (sb.Length == 0)
+            throw new DomainException("Phone must contain digits.");
+        return sb.ToString();
     }
 
     private static CustomerDto Map(Customer c) =>

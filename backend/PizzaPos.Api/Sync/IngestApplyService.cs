@@ -141,14 +141,25 @@ public class IngestApplyService : IIngestApplyService
         {
             foreach (var i in items.EnumerateArray())
             {
+                var productId = i.GetProperty("productId").GetGuid();
+                var productName = i.GetProperty("productName").GetString() ?? "";
+                var unitPrice = i.GetProperty("unitPrice").GetDecimal();
+
+                // v0.1.22: Kasa SQLite'ında olup cloud Postgres'inde olmayan
+                // ürünler için lazy backfill. CLAUDE.md kuralı "Products cloud-only
+                // yazılır" der ama pratikte kasa lokalde ürün yaratabiliyor (seed,
+                // hızlı test). FK violation'a düşmesin diye snapshot'tan placeholder
+                // Product yarat. Cloud admin sonra rename + Category set edebilir.
+                await EnsureProductExistsAsync(productId, storeId, productName, unitPrice, ct);
+
                 var item = new OrderItem
                 {
                     Id = i.GetProperty("id").GetGuid(),
                     StoreId = storeId,
                     OrderId = orderId,
-                    ProductId = i.GetProperty("productId").GetGuid(),
-                    ProductName = i.GetProperty("productName").GetString() ?? "",
-                    UnitPrice = i.GetProperty("unitPrice").GetDecimal(),
+                    ProductId = productId,
+                    ProductName = productName,
+                    UnitPrice = unitPrice,
                     Quantity = i.GetProperty("quantity").GetInt32(),
                     LineTotal = i.GetProperty("lineTotal").GetDecimal(),
                     Notes = TryGetString(i, "notes"),
@@ -198,20 +209,80 @@ public class IngestApplyService : IIngestApplyService
         if (order is null)
             throw new InvalidOperationException($"OrderItemAdded references missing Order {orderId}");
 
+        var productId = data.GetProperty("productId").GetGuid();
+        var productName = data.GetProperty("productName").GetString() ?? "";
+        var unitPrice = data.GetProperty("unitPrice").GetDecimal();
+        // Same lazy-backfill semantik (bkz. ApplyOrderCreatedAsync).
+        await EnsureProductExistsAsync(productId, order.StoreId, productName, unitPrice, ct);
+
         _db.OrderItems.Add(new OrderItem
         {
             Id = itemId,
             StoreId = order.StoreId,
             OrderId = orderId,
-            ProductId = data.GetProperty("productId").GetGuid(),
-            ProductName = data.GetProperty("productName").GetString() ?? "",
-            UnitPrice = data.GetProperty("unitPrice").GetDecimal(),
+            ProductId = productId,
+            ProductName = productName,
+            UnitPrice = unitPrice,
             Quantity = data.GetProperty("quantity").GetInt32(),
             LineTotal = data.GetProperty("lineTotal").GetDecimal(),
         });
         await _db.SaveChangesAsync(ct);
 
         await RecalcOrderTotalsAsync(orderId, ct);
+    }
+
+    /// <summary>
+    /// Cloud'da olmayan ürünleri snapshot'tan lazy yaratır. CategoryId zorunlu
+    /// (Product FK); store'da herhangi bir kategori varsa onunla bağla, yoksa
+    /// "(Otomatik)" placeholder kategori yarat. IsAvailable=false ile gizler;
+    /// admin /admin/products'ta görüp düzenleyebilir veya silebilir.
+    /// </summary>
+    private async Task EnsureProductExistsAsync(
+        Guid productId, Guid storeId, string productName, decimal unitPrice, CancellationToken ct)
+    {
+        var exists = await _db.Products.IgnoreQueryFilters()
+            .AnyAsync(p => p.Id == productId, ct);
+        if (exists) return;
+
+        var categoryId = await _db.Categories.IgnoreQueryFilters()
+            .Where(c => c.StoreId == storeId)
+            .OrderBy(c => c.DisplayOrder)
+            .Select(c => c.Id)
+            .FirstOrDefaultAsync(ct);
+
+        if (categoryId == Guid.Empty)
+        {
+            var placeholderCat = new Category
+            {
+                Id = Guid.NewGuid(),
+                StoreId = storeId,
+                Name = "(Otomatik)",
+                DisplayOrder = 9999,
+                IsActive = true,
+            };
+            _db.Categories.Add(placeholderCat);
+            await _db.SaveChangesAsync(ct);
+            categoryId = placeholderCat.Id;
+            _logger.LogWarning(
+                "Cloud lazy backfill: Store {StoreId} hiç kategori yok, '(Otomatik)' placeholder yaratıldı.",
+                storeId);
+        }
+
+        _db.Products.Add(new Product
+        {
+            Id = productId,
+            StoreId = storeId,
+            CategoryId = categoryId,
+            Name = string.IsNullOrWhiteSpace(productName) ? "(Bilinmeyen)" : productName,
+            Price = unitPrice,
+            IsAvailable = false,
+            DisplayOrder = 9999,
+        });
+        await _db.SaveChangesAsync(ct);
+
+        _logger.LogWarning(
+            "Cloud lazy backfill: Product {Id} '{Name}' kasada vardı, cloud'da yoktu — placeholder yaratıldı (IsAvailable=false).",
+            productId, productName);
     }
 
     private async Task ApplyOrderItemQuantityUpdatedAsync(JsonElement data, CancellationToken ct)

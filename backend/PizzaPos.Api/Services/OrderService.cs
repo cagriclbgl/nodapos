@@ -898,20 +898,23 @@ public class OrderService : IOrderService
 
         var newStatus = request.Status;
         var courierUserId = request.CourierUserId;
-
-        if (newStatus == FulfillmentStatus.OutForDelivery
-            && orderInfo.OrderType == OrderType.Delivery
-            && courierUserId is null)
-            throw new DomainException(
-                "CourierUserId is required when moving a Delivery order to OutForDelivery.");
-
+        // v0.1.22: CourierUserId artık zorunlu DEĞİL — kasiyer kuryeyi sonradan
+        // atayacak veya hiç atamayabilir; OutForDelivery transition'ı sadece
+        // siparişin yola çıktığını işaretler. Order status hâlâ Active kalır,
+        // Delivered'a geçince otomatik Completed olur (aşağıda).
         var now = DateTime.UtcNow;
-        // Stamp transition timestamps when entering each terminal-ish state;
-        // otherwise preserve the existing timestamp (kasiyer rollback edebilir).
         var newOutForDeliveryAt = newStatus == FulfillmentStatus.OutForDelivery
             ? (DateTime?)now : orderInfo.OutForDeliveryAt;
         var newDeliveredAt = newStatus == FulfillmentStatus.Delivered
             ? (DateTime?)now : orderInfo.DeliveredAt;
+        // v0.1.22: Delivered'a geçen sipariş otomatik Order.Status=Completed olur.
+        // Kasiyer ayrıca "Tamamla" basmak zorunda kalmasın (sipariş zaten ödenmiş,
+        // teslim de edildi → tamamlandı sayılır). Payment kaydı varsa Total = sum
+        // payments, yoksa Order.Total üzerinden — bu eski Completed flow gibi.
+        var willComplete = newStatus == FulfillmentStatus.Delivered
+            && orderInfo.Status == OrderStatus.Active;
+        var newOrderStatus = willComplete ? OrderStatus.Completed : orderInfo.Status;
+        var newCompletedAt = willComplete ? (DateTime?)now : (DateTime?)null;
 
         var rows = await _db.Orders
             .Where(o => o.Id == orderInfo.Id)
@@ -920,6 +923,8 @@ public class OrderService : IOrderService
                 .SetProperty(o => o.AssignedCourierUserId, courierUserId)
                 .SetProperty(o => o.OutForDeliveryAt, newOutForDeliveryAt)
                 .SetProperty(o => o.DeliveredAt, newDeliveredAt)
+                .SetProperty(o => o.Status, newOrderStatus)
+                .SetProperty(o => o.CompletedAt, willComplete ? newCompletedAt : (DateTime?)null)
                 .SetProperty(o => o.UpdatedAt, (DateTime?)now), ct);
         if (rows == 0)
             throw DomainException.Conflict("Order disappeared while updating fulfillment.");
@@ -934,6 +939,21 @@ public class OrderService : IOrderService
                 deliveredAt = newDeliveredAt,
                 updatedAt = now
             }, ct);
+
+        // Eğer Delivered → Completed transition de olduysa, OrderCompleted event'ini
+        // de emit et — cloud admin "tamamlananlar" listesinde görünsün, raporlar
+        // güncellensin. Payment kaydı yok bu yolda (teslim akışı), Total snapshot'i
+        // değişmediği için cloud-side ApplyOrderCompletedAsync idempotent çalışır.
+        if (willComplete)
+        {
+            await _outbox.EmitAsync("Order", orderInfo.Id, "OrderCompleted",
+                new
+                {
+                    orderId = orderInfo.Id,
+                    completedAt = now,
+                    payments = Array.Empty<object>(),
+                }, ct);
+        }
         await _db.SaveChangesAsync(ct);
 
         return (await GetAsync(orderInfo.Id, ct))!;
