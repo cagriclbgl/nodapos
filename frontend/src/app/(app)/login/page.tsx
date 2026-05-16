@@ -133,6 +133,17 @@ export default function LoginPage() {
     }
   };
 
+  // Electron /login'i doğrudan yüklüyor; geçerli session ile açılışta form
+  // flash'ı olmasın. Auth hydrate olana kadar veya redirect effect tetiklenene
+  // kadar spinner göster.
+  if (authLoading || user) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-gradient-to-br from-orange-50 via-amber-50 to-rose-50 dark:from-zinc-950 dark:via-zinc-900 dark:to-zinc-950">
+        <p className="text-sm text-muted-foreground">Yükleniyor…</p>
+      </main>
+    );
+  }
+
   return (
     <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-orange-50 via-amber-50 to-rose-50 px-6 py-10 dark:from-zinc-950 dark:via-zinc-900 dark:to-zinc-950">
       {/* Dekoratif blur orb'ları — sıcak NodaPos paleti */}

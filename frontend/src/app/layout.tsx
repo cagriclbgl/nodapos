@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { AuthProvider } from "@/lib/auth-context";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -15,10 +14,11 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "NodaPos",
+    default: "NodaPos — İşletmen için Bulut POS",
     template: "%s · NodaPos",
   },
-  description: "Restoran için bulut tabanlı POS ve yönetim sistemi.",
+  description:
+    "Restoran, kafe ve fast food için bulut tabanlı POS ve yönetim sistemi. Offline çalışan kasa, tek panelden çoklu mağaza yönetimi, arayan numara entegrasyonu.",
 };
 
 export default function RootLayout({
@@ -30,7 +30,7 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
-        <AuthProvider>{children}</AuthProvider>
+        {children}
       </body>
     </html>
   );

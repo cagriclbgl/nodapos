@@ -272,11 +272,14 @@ async function createWindow(frontendPort: number) {
     },
   });
 
+  // Doğrudan /login'e yükle: kasiyer marketing sayfasını görmesin.
+  // Geçerli session varsa /login kendi içinde role'e göre /admin veya /pos'a
+  // yönlendiriyor (login/page.tsx — useAuth hydrate olunca router.replace).
   const url =
     process.env.PIZZAPOS_DEV_URL ||
     (app.isPackaged
-      ? `http://127.0.0.1:${frontendPort}`
-      : "http://localhost:3000");
+      ? `http://127.0.0.1:${frontendPort}/login`
+      : "http://localhost:3000/login");
   log(`Loading window: ${url}`);
   await mainWindow.loadURL(url);
 }
