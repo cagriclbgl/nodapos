@@ -13,7 +13,7 @@ import { Button } from "@/components/ui-v2/button";
 import { Badge } from "@/components/ui-v2/badge";
 import { Skeleton } from "@/components/ui-v2/skeleton";
 import { cn } from "@/lib/utils";
-import { OptionsDialog } from "@/app/pos/table/[id]/options-dialog";
+import { OptionsDialog } from "@/app/(app)/pos/table/[id]/options-dialog";
 import type {
   AddComboToOrderRequest,
   AddOrderItemRequest,
