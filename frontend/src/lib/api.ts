@@ -22,6 +22,7 @@ import type {
   RejectRegistrationRequest,
   ResetPasswordRequest,
   ResolveIncomingCallRequest,
+  StoreAnalyticsDto,
   StoreDto,
   StoreOverviewDto,
   StoreRegistrationRequestDto,
@@ -29,7 +30,10 @@ import type {
   SupervisorCreateUserRequest,
   SupervisorDashboardDto,
   SupervisorLoginRequest,
+  SupervisorPeriod,
+  SupervisorRevenueTrendDto,
   SupervisorSessionResponse,
+  SupervisorTodaySummaryDto,
   UpdateComboRequest,
   UpdateCustomerRequest,
   UpdateIncomingCallNoteRequest,
@@ -303,9 +307,33 @@ export const supervisorAuth = {
   me: () => api.get<SupervisorSessionResponse>("/api/supervisor/auth/me"),
 };
 
+/**
+ * Browser tz offset in minutes — backend uses this to bucket "today" / hour /
+ * day in the supervisor's wall-clock time. Date.getTimezoneOffset() returns
+ * minutes WEST of UTC (positive = behind), so negate it.
+ */
+function tzOffsetMinutes(): number {
+  if (typeof window === "undefined") return 180; // server-side fallback = TR
+  return -new Date().getTimezoneOffset();
+}
+
 export const supervisor = {
   dashboard: () =>
     api.get<SupervisorDashboardDto>("/api/supervisor/dashboard"),
+  analytics: {
+    today: () =>
+      api.get<SupervisorTodaySummaryDto>(
+        `/api/supervisor/analytics/today?tzOffsetMinutes=${tzOffsetMinutes()}`
+      ),
+    revenueTrend: (days = 7) =>
+      api.get<SupervisorRevenueTrendDto>(
+        `/api/supervisor/analytics/revenue-trend?days=${days}&tzOffsetMinutes=${tzOffsetMinutes()}`
+      ),
+    store: (id: string, period: SupervisorPeriod) =>
+      api.get<StoreAnalyticsDto>(
+        `/api/supervisor/stores/${id}/analytics?period=${period}&tzOffsetMinutes=${tzOffsetMinutes()}`
+      ),
+  },
   registrations: {
     list: (status?: StoreRegistrationStatus) => {
       const qs = status ? `?status=${status}` : "";

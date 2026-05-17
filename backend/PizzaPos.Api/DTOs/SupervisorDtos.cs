@@ -80,3 +80,81 @@ public record SupervisorCreateUserRequest(
     string FullName,
     string Password,
     UserRole Role);
+
+// --- Analytics --------------------------------------------------------------
+// Tüm endpoint'ler "revenue" tanımı olarak Payment.Amount toplamını kullanır
+// (kasiyer ödeme aldıkça gerçek tahsilat — supervisor kararı, 2026-05-17).
+// Saat dilimi: client kendi yerel günün UTC aralığını [fromUtc, toUtc) gönderir;
+// "today" yardımcı endpoint'leri ise Europe/Istanbul (UTC+3) baz alır.
+
+public record SupervisorTodaySummaryDto(
+    DateTime FromUtc,
+    DateTime ToUtc,
+    decimal TotalRevenue,
+    int OrderCount,
+    decimal AverageBasket,
+    int ActiveStoreCount,
+    int TotalStoreCount,
+    IReadOnlyList<StoreTodayRowDto> Stores);
+
+public record StoreTodayRowDto(
+    Guid StoreId,
+    string StoreName,
+    bool IsActive,
+    decimal Revenue,
+    int OrderCount,
+    decimal AverageBasket,
+    int OpenOrderCount,
+    DateTime? LastPaymentAt,
+    int UserCount,
+    int LifetimeOrderCount);
+
+public record RevenueTrendPointDto(
+    /// <summary>Yerel gün (YYYY-MM-DD) — client'in tz offset'iyle hesaplanmış.</summary>
+    string Date,
+    decimal Revenue,
+    int OrderCount);
+
+public record SupervisorRevenueTrendDto(
+    int Days,
+    IReadOnlyList<RevenueTrendPointDto> Points);
+
+public record StoreAnalyticsDto(
+    Guid StoreId,
+    string StoreName,
+    string Period,
+    DateTime FromUtc,
+    DateTime ToUtc,
+    decimal TotalRevenue,
+    int OrderCount,
+    decimal AverageBasket,
+    int OpenOrderCount,
+    int CancelledOrderCount,
+    IReadOnlyList<HourlyPointDto> Hourly,
+    IReadOnlyList<RevenueTrendPointDto> Daily,
+    IReadOnlyList<TopProductDto> TopProducts,
+    IReadOnlyList<OpenOrderRowDto> OpenOrders,
+    IReadOnlyList<PaymentMethodBreakdown> PaymentBreakdown,
+    IReadOnlyList<OrderTypeBreakdown> OrderTypeBreakdown);
+
+public record HourlyPointDto(
+    /// <summary>0..23 — client'in yerel saati.</summary>
+    int Hour,
+    decimal Revenue,
+    int OrderCount);
+
+public record TopProductDto(
+    Guid ProductId,
+    string ProductName,
+    int Quantity,
+    decimal Revenue);
+
+public record OpenOrderRowDto(
+    Guid OrderId,
+    string OrderNumber,
+    OrderType OrderType,
+    decimal Total,
+    string? TableName,
+    string? CustomerName,
+    DateTime CreatedAt,
+    FulfillmentStatus FulfillmentStatus);

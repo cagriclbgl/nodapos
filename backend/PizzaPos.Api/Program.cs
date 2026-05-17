@@ -79,6 +79,7 @@ builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<ISupervisorAuthService, SupervisorAuthService>();
 builder.Services.AddScoped<IStoreRegistrationService, StoreRegistrationService>();
 builder.Services.AddScoped<ISupervisorAdminService, SupervisorAdminService>();
+builder.Services.AddScoped<ISupervisorAnalyticsService, SupervisorAnalyticsService>();
 
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)

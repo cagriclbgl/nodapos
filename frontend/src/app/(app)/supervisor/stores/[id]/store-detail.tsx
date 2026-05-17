@@ -37,7 +37,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui-v2/dialog";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui-v2/tabs";
 import { formatDateTime } from "@/lib/format";
+import { StorePerformance } from "./store-performance";
 
 const ROLE_LABEL: Record<UserRole, string> = {
   Manager: "Yönetici",
@@ -108,14 +115,25 @@ export function StoreDetail({ storeId }: { storeId: string }) {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <StoreEditCard store={store} onUpdated={refresh} />
-        <UsersCard
-          storeId={storeId}
-          users={users}
-          onChanged={refresh}
-        />
-      </div>
+      <Tabs defaultValue="performance">
+        <TabsList>
+          <TabsTrigger value="performance">Performans</TabsTrigger>
+          <TabsTrigger value="management">Yönetim</TabsTrigger>
+        </TabsList>
+        <TabsContent value="performance" className="mt-6">
+          <StorePerformance storeId={storeId} />
+        </TabsContent>
+        <TabsContent value="management" className="mt-6">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <StoreEditCard store={store} onUpdated={refresh} />
+            <UsersCard
+              storeId={storeId}
+              users={users}
+              onChanged={refresh}
+            />
+          </div>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

@@ -460,6 +460,92 @@ export interface SupervisorCreateUserRequest {
   role: UserRole;
 }
 
+// --- Supervisor Analytics ---------------------------------------------------
+// Revenue = Payment.Amount toplamı (fiili tahsilat). Order count = aralıkta
+// ödemesi olan distinct order sayısı.
+
+export interface StoreTodayRowDto {
+  storeId: string;
+  storeName: string;
+  isActive: boolean;
+  revenue: number;
+  orderCount: number;
+  averageBasket: number;
+  openOrderCount: number;
+  lastPaymentAt: string | null;
+  userCount: number;
+  lifetimeOrderCount: number;
+}
+
+export interface SupervisorTodaySummaryDto {
+  fromUtc: string;
+  toUtc: string;
+  totalRevenue: number;
+  orderCount: number;
+  averageBasket: number;
+  activeStoreCount: number;
+  totalStoreCount: number;
+  stores: StoreTodayRowDto[];
+}
+
+export interface RevenueTrendPointDto {
+  /** Yerel gün — "YYYY-MM-DD". */
+  date: string;
+  revenue: number;
+  orderCount: number;
+}
+
+export interface SupervisorRevenueTrendDto {
+  days: number;
+  points: RevenueTrendPointDto[];
+}
+
+export type SupervisorPeriod = "today" | "7d" | "30d";
+
+export interface HourlyPointDto {
+  /** 0..23 — yerel saat. */
+  hour: number;
+  revenue: number;
+  orderCount: number;
+}
+
+export interface TopProductDto {
+  productId: string;
+  productName: string;
+  quantity: number;
+  revenue: number;
+}
+
+export interface OpenOrderRowDto {
+  orderId: string;
+  orderNumber: string;
+  orderType: OrderType;
+  total: number;
+  tableName: string | null;
+  customerName: string | null;
+  createdAt: string;
+  fulfillmentStatus: FulfillmentStatus;
+}
+
+export interface StoreAnalyticsDto {
+  storeId: string;
+  storeName: string;
+  period: SupervisorPeriod;
+  fromUtc: string;
+  toUtc: string;
+  totalRevenue: number;
+  orderCount: number;
+  averageBasket: number;
+  openOrderCount: number;
+  cancelledOrderCount: number;
+  hourly: HourlyPointDto[];
+  daily: RevenueTrendPointDto[];
+  topProducts: TopProductDto[];
+  openOrders: OpenOrderRowDto[];
+  paymentBreakdown: PaymentMethodBreakdown[];
+  orderTypeBreakdown: OrderTypeBreakdown[];
+}
+
 // --- Caller ID & Incoming Calls --------------------------------------------
 
 export type IncomingCallStatus = "New" | "Handled" | "Missed" | "Ignored";

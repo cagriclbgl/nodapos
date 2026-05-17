@@ -26,7 +26,7 @@ interface NavItem {
 }
 
 const NAV: NavItem[] = [
-  { href: "/supervisor", label: "Özet", icon: BarChart3 },
+  { href: "/supervisor", label: "Bugün", icon: BarChart3 },
   {
     href: "/supervisor/registrations",
     label: "Başvurular",
