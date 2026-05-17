@@ -302,11 +302,13 @@ function PrimaryKpi({
         />
       </CardHeader>
       <CardContent>
-        {loading || value === null ? (
+        {loading ? (
           <Skeleton className="h-9 w-24" />
         ) : (
-          <p className="font-mono text-2xl font-semibold tabular-nums tracking-tight">
-            {value}
+          <p
+            className={`font-mono text-2xl font-semibold tabular-nums tracking-tight ${value === null ? "text-muted-foreground" : ""}`}
+          >
+            {value ?? "—"}
           </p>
         )}
         {subtitle && (

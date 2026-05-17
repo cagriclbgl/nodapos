@@ -191,21 +191,45 @@ public class SupervisorAnalyticsService : ISupervisorAnalyticsService
             }).ToList();
         }
 
-        var topProducts = await _db.OrderItems
+        // Completed order ID'leri önce çek — OrderItems üzerinde navigation
+        // üzerinden join + composite GroupBy + record-pozisyonel projection
+        // EF Core 9 PG provider'ında translate edilemiyor; iki adımlı plan
+        // hem güvenli hem yeterince hızlı (günlük < birkaç bin order).
+        var completedOrderIds = await _db.Orders
             .IgnoreQueryFilters()
-            .Where(oi => oi.StoreId == storeId
-                && oi.Order!.Status == OrderStatus.Completed
-                && oi.Order.CompletedAt >= fromUtc
-                && oi.Order.CompletedAt < toUtc)
-            .GroupBy(oi => new { oi.ProductId, oi.ProductName })
-            .Select(g => new TopProductDto(
-                g.Key.ProductId,
-                g.Key.ProductName,
-                g.Sum(x => x.Quantity),
-                g.Sum(x => x.LineTotal)))
-            .OrderByDescending(x => x.Quantity)
-            .Take(10)
+            .Where(o => o.StoreId == storeId
+                && o.Status == OrderStatus.Completed
+                && o.CompletedAt >= fromUtc
+                && o.CompletedAt < toUtc)
+            .Select(o => o.Id)
             .ToListAsync(ct);
+
+        List<TopProductDto> topProducts;
+        if (completedOrderIds.Count == 0)
+        {
+            topProducts = new List<TopProductDto>();
+        }
+        else
+        {
+            var topProductRows = await _db.OrderItems
+                .IgnoreQueryFilters()
+                .Where(oi => oi.StoreId == storeId && completedOrderIds.Contains(oi.OrderId))
+                .GroupBy(oi => new { oi.ProductId, oi.ProductName })
+                .Select(g => new
+                {
+                    g.Key.ProductId,
+                    g.Key.ProductName,
+                    Quantity = g.Sum(x => x.Quantity),
+                    Revenue = g.Sum(x => x.LineTotal),
+                })
+                .OrderByDescending(x => x.Quantity)
+                .Take(10)
+                .ToListAsync(ct);
+
+            topProducts = topProductRows
+                .Select(r => new TopProductDto(r.ProductId, r.ProductName, r.Quantity, r.Revenue))
+                .ToList();
+        }
 
         var openOrders = period == "today"
             ? await _db.Orders

@@ -316,11 +316,13 @@ function Kpi({
         />
       </CardHeader>
       <CardContent>
-        {loading || value === null ? (
+        {loading ? (
           <Skeleton className="h-8 w-20" />
         ) : (
-          <p className="font-mono text-xl font-semibold tabular-nums">
-            {value}
+          <p
+            className={`font-mono text-xl font-semibold tabular-nums ${value === null ? "text-muted-foreground" : ""}`}
+          >
+            {value ?? "—"}
           </p>
         )}
         {subtitle && (
