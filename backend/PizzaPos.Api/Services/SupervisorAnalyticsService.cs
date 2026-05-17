@@ -258,16 +258,28 @@ public class SupervisorAnalyticsService : ISupervisorAnalyticsService
             .OrderBy(b => (int)b.Method)
             .ToList();
 
-        var orderTypeBreakdown = await _db.Orders
+        // EF Core 9 PG provider GroupBy + record-pozisyonel projection
+        // ikilisini çeviremiyor; anonymous type ile materialize edip
+        // in-memory DTO'ya çeviriyoruz.
+        var orderTypeRows = await _db.Orders
             .IgnoreQueryFilters()
             .Where(o => o.StoreId == storeId
                 && o.Status == OrderStatus.Completed
                 && o.CompletedAt >= fromUtc
                 && o.CompletedAt < toUtc)
             .GroupBy(o => o.OrderType)
-            .Select(g => new OrderTypeBreakdown(g.Key, g.Count(), g.Sum(x => x.Total)))
-            .OrderBy(b => (int)b.OrderType)
+            .Select(g => new
+            {
+                OrderType = g.Key,
+                Count = g.Count(),
+                Total = g.Sum(x => x.Total),
+            })
             .ToListAsync(ct);
+
+        var orderTypeBreakdown = orderTypeRows
+            .Select(x => new OrderTypeBreakdown(x.OrderType, x.Count, x.Total))
+            .OrderBy(b => (int)b.OrderType)
+            .ToList();
 
         return new StoreAnalyticsDto(
             store.Id, store.Name, period,
