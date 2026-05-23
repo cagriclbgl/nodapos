@@ -37,3 +37,28 @@ public record OrderTypeBreakdown(
     OrderType OrderType,
     int Count,
     decimal Total);
+
+/// <summary>
+/// Haftalık / aylık / özel aralık raporu — `DailySummary`'nin çok günlük versiyonu.
+/// Aynı KPI'lar + en çok satan ürünler (top N). Yerel-takvim "from..to" (kapalı–kapalı)
+/// kullanıcıya gösterilir; backend [fromUtc, toUtc) yarı-açık aralığa çevirir.
+/// </summary>
+public record PeriodSummaryDto(
+    string FromDate,
+    string ToDate,
+    DateTime RangeStartUtc,
+    DateTime RangeEndUtc,
+    int CompletedOrderCount,
+    int CancelledOrderCount,
+    decimal TotalRevenue,
+    decimal TotalDiscount,
+    int TotalItemQuantity,
+    IReadOnlyList<PaymentMethodBreakdown> PaymentBreakdown,
+    IReadOnlyList<OrderTypeBreakdown> OrderTypeBreakdown,
+    IReadOnlyList<TopProductRow> TopProducts);
+
+public record TopProductRow(
+    Guid ProductId,
+    string ProductName,
+    int Quantity,
+    decimal Revenue);

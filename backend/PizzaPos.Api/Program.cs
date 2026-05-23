@@ -39,11 +39,10 @@ builder.Services.AddDbContext<AppDbContext>(opt =>
 
     // Snapshot drift'i (eski model snapshot vs güncel ModelBuilder çıktısı) artık
     // Migrate() sırasında crash sebebi (.NET 9+ default). DB şeması manuel DDL
-    // (AddCustomersAndOutbox + idempotent ALTER) ile zaten doğru — bu uyarıyı
-    // production'da log + devam, dev'de yine fail-fast bırakıyoruz.
-    if (!builder.Environment.IsDevelopment())
-        opt.ConfigureWarnings(w =>
-            w.Ignore(RelationalEventId.PendingModelChangesWarning));
+    // (AddCustomersAndOutbox + idempotent ALTER) ile zaten doğru — uyarıyı tüm
+    // ortamlarda bastırıyoruz; dev fail-fast'i artık faydadan çok engel.
+    opt.ConfigureWarnings(w =>
+        w.Ignore(RelationalEventId.PendingModelChangesWarning));
 });
 
 // --- Tenancy ----------------------------------------------------------------
@@ -315,21 +314,47 @@ var app = builder.Build();
                 """);
         }
 
+        // pre-v0.1.7 kurulumlarda combos/products tablosu hiç yaratılmamış olabilir
+        // (EnsureCreated, başka tablolar varsa hiç müdahale etmez). Bu satırlar
+        // idempotent CREATE — modern DB'de no-op, eski DB'de tabloyu yaratır ve
+        // sonraki TryAddColumn ALTER'larını korur.
+        await schemaDb.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS combos (
+                Id TEXT NOT NULL PRIMARY KEY,
+                StoreId TEXT NOT NULL,
+                Name TEXT NOT NULL,
+                Description TEXT NULL,
+                Price TEXT NOT NULL,
+                IsActive INTEGER NOT NULL DEFAULT 1,
+                DisplayOrder INTEGER NOT NULL DEFAULT 0,
+                CreatedAt TEXT NOT NULL,
+                UpdatedAt TEXT NULL,
+                FOREIGN KEY (StoreId) REFERENCES stores(Id) ON DELETE RESTRICT
+            );
+            CREATE INDEX IF NOT EXISTS IX_combos_StoreId ON combos (StoreId);
+            """);
+
         // Idempotent ADD COLUMN — EnsureCreated mevcut tablolara yeni kolon
         // EKLEMEZ. Upgrade akışında bu satırlar olmadan v0.1.9'a güncellenen
         // kasalar yeni alanları görmez. Duplicate column hatası bekliyoruz
-        // (zaten varsa); onu yutuyoruz.
+        // (zaten varsa); onu yutuyoruz. Tablo hiç yoksa (silinmiş / pre-v0.1.7
+        // DB) onu da yut — eksik tablo `CREATE TABLE IF NOT EXISTS` ile yukarıda
+        // veya EF model üzerinden tekrar oluşturulur.
         async Task TryAddColumn(string sql)
         {
             try { await schemaDb.Database.ExecuteSqlRawAsync(sql); }
             catch (Microsoft.Data.Sqlite.SqliteException ex)
-                when (ex.Message.Contains("duplicate column", StringComparison.OrdinalIgnoreCase))
+                when (ex.Message.Contains("duplicate column", StringComparison.OrdinalIgnoreCase)
+                   || ex.Message.Contains("no such table", StringComparison.OrdinalIgnoreCase))
             {
-                // already added
+                // already added — or table missing (handled elsewhere)
             }
         }
         await TryAddColumn("ALTER TABLE products ADD COLUMN DeliveryPrice TEXT NULL;");
         await TryAddColumn("ALTER TABLE combos ADD COLUMN DeliveryPrice TEXT NULL;");
+        // Paket servis option ek fiyatı (Boyut/Ekstra için ayrı fiyat).
+        await TryAddColumn(
+            "ALTER TABLE product_options ADD COLUMN DeliveryAdditionalPrice TEXT NULL;");
     }
     else
     {

@@ -24,12 +24,15 @@ interface Props {
 interface DraftRow {
   name: string;
   price: string; // input olarak string tutuluyor — boş bırakma + "0,5" virgül edge case'leri için
+  /** Paket servis ek fiyatı. Boş bırakılırsa null gönderilir → gel-al fiyatına fallback. */
+  deliveryPrice: string;
 }
 
 interface UpdateOptionPayload {
   groupName: string;
   name: string;
   additionalPrice: number;
+  deliveryAdditionalPrice: number | null;
   isRequired: boolean;
   isActive: boolean;
   displayOrder: number;
@@ -73,6 +76,7 @@ export function ProductOptionsEditor({ product, onClose, onChanged }: Props) {
       open
       onClose={onClose}
       title={`${product.name} — Seçenekler`}
+      widthClass="max-w-2xl"
       footer={
         <Button variant="secondary" onClick={onClose}>
           Kapat
@@ -197,6 +201,7 @@ function ExistingOptionRow({
   const [draft, setDraft] = useState({
     name: option.name,
     price: option.additionalPrice.toString(),
+    deliveryPrice: option.deliveryAdditionalPrice?.toString() ?? "",
     isActive: option.isActive,
   });
 
@@ -206,6 +211,7 @@ function ExistingOptionRow({
       setDraft({
         name: option.name,
         price: option.additionalPrice.toString(),
+        deliveryPrice: option.deliveryAdditionalPrice?.toString() ?? "",
         isActive: option.isActive,
       });
     }
@@ -221,6 +227,19 @@ function ExistingOptionRow({
       setError("Geçerli bir ek fiyat gir.");
       return;
     }
+    // Boş bırakılırsa null → backend gel-al fiyatına fallback yapar.
+    // Dolu ama parse edilemiyorsa hata ver, sessizce null'a düşmesin.
+    let deliveryPrice: number | null;
+    if (draft.deliveryPrice.trim() === "") {
+      deliveryPrice = null;
+    } else {
+      const parsed = parsePrice(draft.deliveryPrice);
+      if (parsed === null) {
+        setError("Geçerli bir paket servis ek fiyatı gir veya boş bırak.");
+        return;
+      }
+      deliveryPrice = parsed;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -228,6 +247,7 @@ function ExistingOptionRow({
         groupName: option.groupName,
         name: draft.name.trim(),
         additionalPrice: price,
+        deliveryAdditionalPrice: deliveryPrice,
         isRequired: option.isRequired,
         isActive: draft.isActive,
         displayOrder: option.displayOrder,
@@ -269,11 +289,21 @@ function ExistingOptionRow({
         </div>
         <div className="w-28">
           <Input
-            label="+Fiyat (TL)"
+            label="+Gel-Al (TL)"
             type="number"
             step="0.01"
             value={draft.price}
             onChange={(e) => setDraft({ ...draft, price: e.target.value })}
+          />
+        </div>
+        <div className="w-28">
+          <Input
+            label="+Paket (TL)"
+            placeholder="—"
+            type="number"
+            step="0.01"
+            value={draft.deliveryPrice}
+            onChange={(e) => setDraft({ ...draft, deliveryPrice: e.target.value })}
           />
         </div>
         <label className="mb-1 flex items-center gap-1 text-xs">
@@ -313,8 +343,16 @@ function ExistingOptionRow({
         </p>
         <p className="text-xs text-zinc-500">
           {option.additionalPrice > 0
-            ? `+${formatCurrency(option.additionalPrice)}`
-            : "Ek ücret yok"}
+            ? `+${formatCurrency(option.additionalPrice)} gel-al`
+            : "Gel-al: ek ücret yok"}
+          {option.deliveryAdditionalPrice != null && (
+            <>
+              {" · "}
+              {option.deliveryAdditionalPrice > 0
+                ? `+${formatCurrency(option.deliveryAdditionalPrice)} paket`
+                : "Paket: ek ücret yok"}
+            </>
+          )}
         </p>
       </div>
       <div className="flex items-center gap-1">
@@ -359,15 +397,15 @@ function BulkAddPanel({
 
   // Boyut preset'i için 3 satır pre-filled.
   const [sizeRows, setSizeRows] = useState<DraftRow[]>([
-    { name: "Küçük", price: "0" },
-    { name: "Orta", price: "20" },
-    { name: "Büyük", price: "40" },
+    { name: "Küçük", price: "0", deliveryPrice: "" },
+    { name: "Orta", price: "20", deliveryPrice: "" },
+    { name: "Büyük", price: "40", deliveryPrice: "" },
   ]);
   const [sizeGroupName, setSizeGroupName] = useState("Boyut");
 
   // Ekstra için 1 boş satırla başla; "+ Satır" ile büyütülür.
   const [extraRows, setExtraRows] = useState<DraftRow[]>([
-    { name: "", price: "10" },
+    { name: "", price: "10", deliveryPrice: "" },
   ]);
   const [extraGroupName, setExtraGroupName] = useState("Ekstra Malzeme");
 
@@ -376,11 +414,13 @@ function BulkAddPanel({
     groupName: string;
     name: string;
     price: string;
+    deliveryPrice: string;
     isRequired: boolean;
   }>({
     groupName: "",
     name: "",
     price: "0",
+    deliveryPrice: "",
     isRequired: false,
   });
 
@@ -408,13 +448,27 @@ function BulkAddPanel({
         const r = cleaned[i].row;
         const price = parsePrice(r.price);
         if (price === null) {
-          setError(`"${r.name}" satırının fiyatı geçersiz.`);
+          setError(`"${r.name}" satırının gel-al fiyatı geçersiz.`);
           return;
+        }
+        let deliveryPrice: number | null;
+        if (r.deliveryPrice.trim() === "") {
+          deliveryPrice = null;
+        } else {
+          const parsed = parsePrice(r.deliveryPrice);
+          if (parsed === null) {
+            setError(
+              `"${r.name}" satırının paket servis fiyatı geçersiz (boş bırak ya da geçerli sayı gir).`
+            );
+            return;
+          }
+          deliveryPrice = parsed;
         }
         const payload: CreateProductOptionRequest = {
           groupName: groupName.trim(),
           name: r.name.trim(),
           additionalPrice: price,
+          deliveryAdditionalPrice: deliveryPrice,
           isRequired,
           displayOrder: existingOrder + i,
         };
@@ -424,14 +478,14 @@ function BulkAddPanel({
       // Başarılıysa formu sıfırla (group adını koru — ekleme zinciri için).
       if (mode === "size") {
         setSizeRows([
-          { name: "", price: "0" },
-          { name: "", price: "0" },
-          { name: "", price: "0" },
+          { name: "", price: "0", deliveryPrice: "" },
+          { name: "", price: "0", deliveryPrice: "" },
+          { name: "", price: "0", deliveryPrice: "" },
         ]);
       } else if (mode === "extra") {
-        setExtraRows([{ name: "", price: "0" }]);
+        setExtraRows([{ name: "", price: "0", deliveryPrice: "" }]);
       } else {
-        setCustomDraft((d) => ({ ...d, name: "", price: "0" }));
+        setCustomDraft((d) => ({ ...d, name: "", price: "0", deliveryPrice: "" }));
       }
     } catch (err) {
       setError(describeError(err));
@@ -490,9 +544,9 @@ function BulkAddPanel({
                     }
                   />
                 </div>
-                <div className="w-32">
+                <div className="w-28">
                   <Input
-                    label={i === 0 ? "+Fiyat (TL)" : ""}
+                    label={i === 0 ? "+Gel-Al (TL)" : ""}
                     type="number"
                     step="0.01"
                     value={r.price}
@@ -500,6 +554,22 @@ function BulkAddPanel({
                       setSizeRows((rs) =>
                         rs.map((x, j) =>
                           j === i ? { ...x, price: e.target.value } : x
+                        )
+                      )
+                    }
+                  />
+                </div>
+                <div className="w-28">
+                  <Input
+                    label={i === 0 ? "+Paket (TL)" : ""}
+                    placeholder="—"
+                    type="number"
+                    step="0.01"
+                    value={r.deliveryPrice}
+                    onChange={(e) =>
+                      setSizeRows((rs) =>
+                        rs.map((x, j) =>
+                          j === i ? { ...x, deliveryPrice: e.target.value } : x
                         )
                       )
                     }
@@ -523,7 +593,10 @@ function BulkAddPanel({
               size="sm"
               variant="ghost"
               onClick={() =>
-                setSizeRows((rs) => [...rs, { name: "", price: "0" }])
+                setSizeRows((rs) => [
+                  ...rs,
+                  { name: "", price: "0", deliveryPrice: "" },
+                ])
               }
               disabled={busy}
             >
@@ -566,9 +639,9 @@ function BulkAddPanel({
                     }
                   />
                 </div>
-                <div className="w-32">
+                <div className="w-28">
                   <Input
-                    label={i === 0 ? "+Fiyat (TL)" : ""}
+                    label={i === 0 ? "+Gel-Al (TL)" : ""}
                     type="number"
                     step="0.01"
                     value={r.price}
@@ -576,6 +649,22 @@ function BulkAddPanel({
                       setExtraRows((rs) =>
                         rs.map((x, j) =>
                           j === i ? { ...x, price: e.target.value } : x
+                        )
+                      )
+                    }
+                  />
+                </div>
+                <div className="w-28">
+                  <Input
+                    label={i === 0 ? "+Paket (TL)" : ""}
+                    placeholder="—"
+                    type="number"
+                    step="0.01"
+                    value={r.deliveryPrice}
+                    onChange={(e) =>
+                      setExtraRows((rs) =>
+                        rs.map((x, j) =>
+                          j === i ? { ...x, deliveryPrice: e.target.value } : x
                         )
                       )
                     }
@@ -599,7 +688,10 @@ function BulkAddPanel({
               size="sm"
               variant="ghost"
               onClick={() =>
-                setExtraRows((rs) => [...rs, { name: "", price: "0" }])
+                setExtraRows((rs) => [
+                  ...rs,
+                  { name: "", price: "0", deliveryPrice: "" },
+                ])
               }
               disabled={busy}
             >
@@ -638,12 +730,22 @@ function BulkAddPanel({
               }
             />
             <Input
-              label="+Fiyat (TL)"
+              label="+Gel-Al Fiyat (TL)"
               type="number"
               step="0.01"
               value={customDraft.price}
               onChange={(e) =>
                 setCustomDraft({ ...customDraft, price: e.target.value })
+              }
+            />
+            <Input
+              label="+Paket Fiyat (TL)"
+              placeholder="—"
+              type="number"
+              step="0.01"
+              value={customDraft.deliveryPrice}
+              onChange={(e) =>
+                setCustomDraft({ ...customDraft, deliveryPrice: e.target.value })
               }
             />
             <label className="mt-6 flex items-center gap-2 text-sm">
@@ -663,7 +765,13 @@ function BulkAddPanel({
               onClick={() =>
                 void submitBatch(
                   customDraft.groupName,
-                  [{ name: customDraft.name, price: customDraft.price }],
+                  [
+                    {
+                      name: customDraft.name,
+                      price: customDraft.price,
+                      deliveryPrice: customDraft.deliveryPrice,
+                    },
+                  ],
                   customDraft.isRequired
                 )
               }

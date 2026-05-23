@@ -203,14 +203,15 @@ public class OrderService : IOrderService
             {
                 if (!opt.IsActive)
                     throw DomainException.Conflict($"Option '{opt.Name}' is inactive.");
+                var optPrice = EffectiveOptionPrice(opt, orderInfo.OrderType);
                 item.Options.Add(new OrderItemOption
                 {
                     ProductOptionId = opt.Id,
-                    GroupName = opt.GroupName,            // SNAPSHOT
-                    OptionName = opt.Name,                // SNAPSHOT
-                    AdditionalPrice = opt.AdditionalPrice // SNAPSHOT
+                    GroupName = opt.GroupName,   // SNAPSHOT
+                    OptionName = opt.Name,       // SNAPSHOT
+                    AdditionalPrice = optPrice   // SNAPSHOT — paket servis varyantı varsa o
                 });
-                optionsTotal += opt.AdditionalPrice;
+                optionsTotal += optPrice;
             }
         }
 
@@ -997,14 +998,15 @@ public class OrderService : IOrderService
             {
                 if (!opt.IsActive)
                     throw DomainException.Conflict($"Option '{opt.Name}' is inactive.");
+                var optPrice = EffectiveOptionPrice(opt, order.OrderType);
                 item.Options.Add(new OrderItemOption
                 {
                     ProductOptionId = opt.Id,
-                    GroupName = opt.GroupName,            // SNAPSHOT
-                    OptionName = opt.Name,                // SNAPSHOT
-                    AdditionalPrice = opt.AdditionalPrice // SNAPSHOT
+                    GroupName = opt.GroupName,   // SNAPSHOT
+                    OptionName = opt.Name,       // SNAPSHOT
+                    AdditionalPrice = optPrice   // SNAPSHOT — paket servis varyantı varsa o
                 });
-                optionsTotal += opt.AdditionalPrice;
+                optionsTotal += optPrice;
             }
         }
 
@@ -1113,6 +1115,15 @@ public class OrderService : IOrderService
         orderType == OrderType.Delivery
             ? (combo.DeliveryPrice ?? combo.Price)
             : combo.Price;
+
+    /// <summary>
+    /// Aynı semantik EffectivePrice ile. Delivery siparişte option'lar
+    /// DeliveryAdditionalPrice'a düşer (null ise AdditionalPrice'a fallback).
+    /// </summary>
+    private static decimal EffectiveOptionPrice(ProductOption option, OrderType orderType) =>
+        orderType == OrderType.Delivery
+            ? (option.DeliveryAdditionalPrice ?? option.AdditionalPrice)
+            : option.AdditionalPrice;
 
     private static string GenerateOrderNumber()
     {

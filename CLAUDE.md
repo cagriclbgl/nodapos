@@ -15,6 +15,7 @@ Restoranlar için (öncelikle pizza dükkanı) **hibrit POS sistemi**: kasa = El
 ## Kritik İş Kuralları
 
 - **Snapshot logic:** Order yaratılırken `OrderItem` tablosuna `ProductName`, `UnitPrice`, `LineTotal`; `OrderItemOption`'a `GroupName`, `OptionName`, `AdditionalPrice` kopyalanır. Sonraki fiyat/menü değişiklikleri geçmişi etkilemez.
+- **Paket servis fiyat ayrımı (2026-05-22):** `Product.DeliveryPrice` (base) + `ProductOption.DeliveryAdditionalPrice` (boyut/ekstra ek fiyatı) + `Combo.DeliveryPrice` — hepsi nullable, null ise normal fiyata fallback. `OrderType.Delivery`'de `OrderService.EffectivePrice` / `EffectiveOptionPrice` / `EffectiveComboPrice` helper'ları snapshot'larda doğru fiyatı seçer. Gel-al (Takeaway) ve dine-in her zaman normal fiyatı kullanır. Admin product-options-editor satırlarında her option için iki ayrı input: `+Gel-Al` ve `+Paket` (boş = gel-al'a fallback). Frontend'te `OptionsDialog` prop'ları (`effectivePrice`, `resolveOptionPrice`) ile çağıran ekran sipariş tipine göre doğru fiyatı geçirir; masa ekranı default'a (product.price + option.additionalPrice) düşer.
 - **Multi-tenancy:** Her tabloda `StoreId`, `AppDbContext` reflection ile otomatik Global Query Filter uygular.
 - **Audit:** `Order.CreatedByUserId`, `Payment.CreatedByUserId` (FK yok, kullanıcı silinse de tutulur).
 - **EF Core + Postgres pooler kuralı:** `OrderService.AddItemAsync` / `CompleteAsync` / `CancelAsync` change-tracker UPDATE yerine **`ExecuteUpdateAsync`** kullanır (tracker UPDATE pooler altında `DbUpdateConcurrencyException (0 rows affected)` veriyor). Yeni Order alanları eklenirse aynı pattern korunmalı.
@@ -45,6 +46,8 @@ $env:Database__Provider = "Sqlite"
 $env:Database__SqlitePath = "pos.db"
 ```
 Migration üretimi: Postgres → `Migrations/Postgres/`, SQLite → `Migrations/Sqlite/`. SQLite migration üretirken Postgres-specific Npgsql annotation'lar kaybolma riski var → `Migrations/Postgres/AppDbContextModelSnapshot.cs`'i önce yedekle.
+
+**Migration snapshot drift uyarısı:** `AppDbContextModelSnapshot.cs` model'in gerisinde kalmış (`DeliveryPrice`, combos table, `StoreId1` shadow drop'ları, vs. snapshot'a yansımamış). `dotnet ef migrations add` çağırırsan kümülatif diff oluşturur ve canlı DB'ye uygulanmaz olur. **Pattern:** Yeni kolon eklerken otomatik scaffolder'ı kullanma — `AddDeliveryPrice` / `AddDeliveryAdditionalPriceToProductOption` örneklerindeki gibi manuel migration .cs dosyası yaz (`migrationBuilder.Sql` ile `ADD COLUMN IF NOT EXISTS`), yanına `XX.MANUAL.sql` koy, SQLite tarafı için `Program.cs` schema bootstrap'ında `TryAddColumn(...)` satırı ekle. Postgres tarafında `Database.MigrateAsync()` `__EFMigrationsHistory`'ye bakıp idempotent uygular.
 
 **Hetzner / Docker deploy:**
 - SSH ile Hetzner kutusuna bağlan, `docker compose up -d` ile postgres + pizzapos-api + caddy ayağa kalkar.

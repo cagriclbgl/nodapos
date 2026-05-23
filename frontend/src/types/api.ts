@@ -127,6 +127,8 @@ export interface ProductOptionDto {
   groupName: string;
   name: string;
   additionalPrice: number;
+  /** Paket servis (Delivery) ek fiyatı — null ise additionalPrice'a fallback. */
+  deliveryAdditionalPrice?: number | null;
   isRequired: boolean;
   isActive: boolean;
   displayOrder: number;
@@ -165,6 +167,7 @@ export interface CreateProductOptionRequest {
   groupName: string;
   name: string;
   additionalPrice: number;
+  deliveryAdditionalPrice?: number | null;
   isRequired: boolean;
   displayOrder: number;
 }
@@ -645,4 +648,29 @@ export interface DailySummaryDto {
   totalItemQuantity: number;
   paymentBreakdown: PaymentMethodBreakdown[];
   orderTypeBreakdown: OrderTypeBreakdown[];
+}
+
+export interface TopProductRow {
+  productId: string;
+  productName: string;
+  quantity: number;
+  revenue: number;
+}
+
+export interface PeriodSummaryDto {
+  /** "YYYY-MM-DD" — kullanıcının istediği aralığın başlangıcı (echo). */
+  fromDate: string;
+  /** "YYYY-MM-DD" — kullanıcının istediği aralığın bitişi (dahil). */
+  toDate: string;
+  rangeStartUtc: string;
+  rangeEndUtc: string;
+  completedOrderCount: number;
+  cancelledOrderCount: number;
+  totalRevenue: number;
+  totalDiscount: number;
+  totalItemQuantity: number;
+  paymentBreakdown: PaymentMethodBreakdown[];
+  orderTypeBreakdown: OrderTypeBreakdown[];
+  /** Adet bazında sıralı en çok satan ürünler. */
+  topProducts: TopProductRow[];
 }

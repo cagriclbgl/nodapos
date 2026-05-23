@@ -11,4 +11,16 @@ public interface IReportService
     /// </summary>
     Task<DailySummaryDto> GetDailySummaryAsync(
         string dateLabel, DateTime fromUtc, DateTime toUtc, CancellationToken ct = default);
+
+    /// <summary>
+    /// Çok günlük aralık özeti — haftalık / aylık raporlar. `topProductsLimit`
+    /// kadar en çok satan ürün (adet bazında) listelenir.
+    /// </summary>
+    Task<PeriodSummaryDto> GetPeriodSummaryAsync(
+        string fromLabel,
+        string toLabel,
+        DateTime fromUtc,
+        DateTime toUtc,
+        int topProductsLimit,
+        CancellationToken ct = default);
 }

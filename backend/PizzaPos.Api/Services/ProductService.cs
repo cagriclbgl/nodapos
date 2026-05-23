@@ -120,12 +120,16 @@ public class ProductService : IProductService
         if (string.IsNullOrWhiteSpace(request.Name) || string.IsNullOrWhiteSpace(request.GroupName))
             throw new DomainException("Option group and name are required.");
 
+        if (request.DeliveryAdditionalPrice.HasValue && request.DeliveryAdditionalPrice.Value < 0)
+            throw new DomainException("Delivery additional price must be non-negative.");
+
         var option = new ProductOption
         {
             ProductId = product.Id,
             GroupName = request.GroupName.Trim(),
             Name = request.Name.Trim(),
             AdditionalPrice = request.AdditionalPrice,
+            DeliveryAdditionalPrice = request.DeliveryAdditionalPrice,
             IsRequired = request.IsRequired,
             IsActive = true,
             DisplayOrder = request.DisplayOrder
@@ -141,9 +145,13 @@ public class ProductService : IProductService
         var option = await _db.ProductOptions.FindAsync([optionId], ct)
             ?? throw DomainException.NotFound("Product option");
 
+        if (request.DeliveryAdditionalPrice.HasValue && request.DeliveryAdditionalPrice.Value < 0)
+            throw new DomainException("Delivery additional price must be non-negative.");
+
         option.GroupName = request.GroupName.Trim();
         option.Name = request.Name.Trim();
         option.AdditionalPrice = request.AdditionalPrice;
+        option.DeliveryAdditionalPrice = request.DeliveryAdditionalPrice;
         option.IsRequired = request.IsRequired;
         option.IsActive = request.IsActive;
         option.DisplayOrder = request.DisplayOrder;
@@ -175,5 +183,6 @@ public class ProductService : IProductService
             p.Options.OrderBy(o => o.DisplayOrder).Select(MapOption).ToList());
 
     private static ProductOptionDto MapOption(ProductOption o) =>
-        new(o.Id, o.GroupName, o.Name, o.AdditionalPrice, o.IsRequired, o.IsActive, o.DisplayOrder);
+        new(o.Id, o.GroupName, o.Name, o.AdditionalPrice, o.DeliveryAdditionalPrice,
+            o.IsRequired, o.IsActive, o.DisplayOrder);
 }

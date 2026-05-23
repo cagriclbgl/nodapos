@@ -8,6 +8,7 @@ import {
   ChevronRight,
   ClipboardList,
   Cloud,
+  FileText,
   LayoutGrid,
   Package,
   Phone,
@@ -37,6 +38,7 @@ const NAV: NavItem[] = [
   { href: "/admin/tables", label: "Masalar", icon: LayoutGrid },
   { href: "/admin/orders", label: "Siparişler", icon: ClipboardList },
   { href: "/admin/end-of-day", label: "Gün Sonu", icon: Receipt },
+  { href: "/admin/reports", label: "Raporlar", icon: FileText },
   { href: "/admin/customers", label: "Müşteriler", icon: Users },
   { href: "/admin/calls", label: "Paket Servis", icon: Phone },
   { href: "/admin/users", label: "Kullanıcılar", icon: UserCog },
@@ -54,7 +56,7 @@ export default function AdminLayout({
   return (
     <AuthGuard role="Manager">
       <div className="flex min-h-screen flex-col md:flex-row">
-        <aside className="border-b bg-card p-4 md:w-64 md:border-b-0 md:border-r">
+        <aside className="border-b bg-card p-4 md:w-64 md:border-b-0 md:border-r print:hidden">
           <div className="mb-6 flex items-center gap-2 px-2">
             <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
               <span className="text-base font-bold">N</span>
@@ -90,7 +92,7 @@ export default function AdminLayout({
           </nav>
         </aside>
         <div className="flex flex-1 flex-col">
-          <header className="flex items-center justify-between border-b bg-card px-6 py-3">
+          <header className="flex items-center justify-between border-b bg-card px-6 py-3 print:hidden">
             <Link
               href="/pos"
               className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
@@ -99,7 +101,7 @@ export default function AdminLayout({
             </Link>
             <UserMenu />
           </header>
-          <main className="flex-1 p-6">{children}</main>
+          <main className="flex-1 p-6 print:p-0">{children}</main>
         </div>
       </div>
     </AuthGuard>

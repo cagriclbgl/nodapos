@@ -10,6 +10,17 @@ interface Props {
   product: ProductDto;
   onClose: () => void;
   onConfirm: (line: AddOrderItemRequest) => Promise<void>;
+  /**
+   * Sipariş tipine göre ürün birim fiyatı (DineIn/Takeaway = product.price,
+   * Delivery = product.deliveryPrice ?? product.price). Belirtilmezse
+   * product.price'a düşer — masa/dine-in default'u.
+   */
+  effectivePrice?: number;
+  /**
+   * Her option için sipariş tipine göre ek fiyat. Belirtilmezse
+   * option.additionalPrice kullanılır.
+   */
+  resolveOptionPrice?: (opt: ProductOptionDto) => number;
 }
 
 /**
@@ -54,8 +65,17 @@ function noteHasPreset(current: string, preset: string): boolean {
  * + quantity + per-line note is sent to the parent which forwards it to the
  * backend (which snapshots option name/price into OrderItemOption).
  */
-export function OptionsDialog({ product, onClose, onConfirm }: Props) {
+export function OptionsDialog({
+  product,
+  onClose,
+  onConfirm,
+  effectivePrice,
+  resolveOptionPrice,
+}: Props) {
   const groups = useMemo(() => groupOptions(product.options), [product]);
+  const basePrice = effectivePrice ?? product.price;
+  const priceOf = (o: ProductOptionDto): number =>
+    resolveOptionPrice ? resolveOptionPrice(o) : o.additionalPrice;
 
   // Pre-select the first option of each required group so the user can
   // confirm in one tap when the defaults are fine.
@@ -87,8 +107,8 @@ export function OptionsDialog({ product, onClose, onConfirm }: Props) {
   const allOptionIds = Object.values(selected).flat();
   const optionExtra = product.options
     .filter((o) => allOptionIds.includes(o.id))
-    .reduce((s, o) => s + o.additionalPrice, 0);
-  const lineTotal = (product.price + optionExtra) * quantity;
+    .reduce((s, o) => s + priceOf(o), 0);
+  const lineTotal = (basePrice + optionExtra) * quantity;
 
   const submit = async () => {
     // Validate: every required group must have a selection.
@@ -153,6 +173,7 @@ export function OptionsDialog({ product, onClose, onConfirm }: Props) {
               <div className="grid grid-cols-2 gap-2">
                 {g.options.map((o) => {
                   const isSelected = selected[g.name]?.includes(o.id) ?? false;
+                  const extra = priceOf(o);
                   return (
                     <button
                       key={o.id}
@@ -165,9 +186,9 @@ export function OptionsDialog({ product, onClose, onConfirm }: Props) {
                       }
                     >
                       <p className="font-medium">{o.name}</p>
-                      {o.additionalPrice > 0 && (
+                      {extra > 0 && (
                         <p className="mt-0.5 text-xs text-zinc-500">
-                          +{formatCurrency(o.additionalPrice)}
+                          +{formatCurrency(extra)}
                         </p>
                       )}
                     </button>

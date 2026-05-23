@@ -175,11 +175,16 @@ export function DeliveryOrderScreen({
     orderType === "Delivery" ? p.deliveryPrice ?? p.price : p.price;
   const effComboPrice = (c: ComboDto): number =>
     orderType === "Delivery" ? c.deliveryPrice ?? c.price : c.price;
+  /** Option ek fiyatı — aynı semantik: Delivery'de DeliveryAdditionalPrice. */
+  const effOptionPrice = (o: ProductOptionDto): number =>
+    orderType === "Delivery"
+      ? o.deliveryAdditionalPrice ?? o.additionalPrice
+      : o.additionalPrice;
 
   /**
-   * Sipariş tipi (Kurye ↔ Gel-Al) değiştiğinde sepetteki birim fiyatları
-   * yeniden snapshot'la — kasiyer öncesinde Kurye fiyatıyla ekleyip sonra
-   * Gel-Al'a geçerse sepet doğru görünür kalır.
+   * Sipariş tipi (Kurye ↔ Gel-Al) değiştiğinde sepetteki birim VE option ek
+   * fiyatlarını yeniden snapshot'la — kasiyer öncesinde Kurye fiyatıyla ekleyip
+   * sonra Gel-Al'a geçerse sepet doğru görünür kalır.
    */
   useEffect(() => {
     setCart((cur) =>
@@ -188,13 +193,20 @@ export function DeliveryOrderScreen({
           const p = products.find((x) => x.id === l.productId);
           if (!p) return l;
           const newUnit = effProductPrice(p);
-          const extras = l.optionSummary.reduce(
-            (s, x) => s + x.additionalPrice,
-            0
-          );
+          // Option summary'sini de yeniden hesapla — additionalPrice mevcut
+          // orderType için doğru olsun. Eksik option (silinmiş vs.) için eski
+          // snapshot fiyatına düş.
+          const newSummary = l.optionSummary.map((s, idx) => {
+            const id = l.productOptionIds[idx];
+            const opt = p.options.find((o) => o.id === id);
+            if (!opt) return s;
+            return { ...s, additionalPrice: effOptionPrice(opt) };
+          });
+          const extras = newSummary.reduce((s, x) => s + x.additionalPrice, 0);
           return {
             ...l,
             unitPrice: newUnit,
+            optionSummary: newSummary,
             lineTotal: (newUnit + extras) * l.quantity,
           };
         }
@@ -280,7 +292,7 @@ export function DeliveryOrderScreen({
       .map((o) => ({
         groupName: o.groupName,
         optionName: o.name,
-        additionalPrice: o.additionalPrice,
+        additionalPrice: effOptionPrice(o),
       }));
     const extras = summary.reduce((s, x) => s + x.additionalPrice, 0);
     const lineTotal = (unit + extras) * line.quantity;
@@ -427,7 +439,7 @@ export function DeliveryOrderScreen({
         <div className="flex items-center gap-2">
           <Button asChild variant="ghost" size="sm">
             <Link href="/pos">
-              <ArrowLeft /> Masalara dön
+              <ArrowLeft /> Geri
             </Link>
           </Button>
           <h2 className="text-xl font-semibold">Yeni Paket / Kurye Sipariş</h2>
@@ -747,6 +759,8 @@ export function DeliveryOrderScreen({
           product={pendingProduct}
           onClose={() => setPendingProduct(null)}
           onConfirm={onOptionsConfirm}
+          effectivePrice={effProductPrice(pendingProduct)}
+          resolveOptionPrice={effOptionPrice}
         />
       )}
 

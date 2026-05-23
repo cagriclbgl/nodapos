@@ -18,6 +18,7 @@ public record ProductOptionDto(
     string GroupName,
     string Name,
     decimal AdditionalPrice,
+    decimal? DeliveryAdditionalPrice,
     bool IsRequired,
     bool IsActive,
     int DisplayOrder);
@@ -45,6 +46,7 @@ public record CreateProductOptionRequest(
     string GroupName,
     string Name,
     decimal AdditionalPrice,
+    decimal? DeliveryAdditionalPrice,
     bool IsRequired,
     int DisplayOrder);
 
@@ -52,6 +54,7 @@ public record UpdateProductOptionRequest(
     string GroupName,
     string Name,
     decimal AdditionalPrice,
+    decimal? DeliveryAdditionalPrice,
     bool IsRequired,
     bool IsActive,
     int DisplayOrder);

@@ -40,4 +40,37 @@ public class ReportsController : TenantControllerBase
         var summary = await _service.GetDailySummaryAsync(label, fromUtc, toUtc, ct);
         return Ok(summary);
     }
+
+    /// <summary>
+    /// GET /api/reports/period-summary?from=2026-05-18&to=2026-05-24&top=5
+    /// Yarı-açık [from 00:00, to+1 00:00) yerel → UTC. `to` dahil edilir.
+    /// `top` parametresi en çok satan ürün sayısıdır (varsayılan 5).
+    /// </summary>
+    [HttpGet("period-summary")]
+    public async Task<ActionResult<PeriodSummaryDto>> PeriodSummary(
+        [FromQuery] string from,
+        [FromQuery] string to,
+        [FromQuery] int top,
+        CancellationToken ct)
+    {
+        if (!DateOnly.TryParseExact(from?.Trim() ?? "", "yyyy-MM-dd", out var fromDate))
+            return BadRequest("'from' YYYY-MM-DD formatında olmalı.");
+        if (!DateOnly.TryParseExact(to?.Trim() ?? "", "yyyy-MM-dd", out var toDate))
+            return BadRequest("'to' YYYY-MM-DD formatında olmalı.");
+        if (toDate < fromDate)
+            return BadRequest("'to' tarihi 'from' tarihinden önce olamaz.");
+
+        var fromLocal = fromDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
+        var toLocalExclusive = toDate.AddDays(1).ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
+
+        var fromUtc = DateTime.SpecifyKind(fromLocal, DateTimeKind.Local).ToUniversalTime();
+        var toUtc = DateTime.SpecifyKind(toLocalExclusive, DateTimeKind.Local).ToUniversalTime();
+
+        var limit = top > 0 ? top : 5;
+        var summary = await _service.GetPeriodSummaryAsync(
+            fromDate.ToString("yyyy-MM-dd"),
+            toDate.ToString("yyyy-MM-dd"),
+            fromUtc, toUtc, limit, ct);
+        return Ok(summary);
+    }
 }
